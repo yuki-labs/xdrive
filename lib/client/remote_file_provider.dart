@@ -397,9 +397,51 @@ class RemoteFileProvider extends ChangeNotifier {
     return 'http://${_connectedService!.host}:${_connectedService!.port}/stream?path=${Uri.encodeComponent(filePath)}';
   }
 
+  // Cache for relay thumbnails (path -> image bytes)
+  final Map<String, Uint8List> _relayThumbnailCache = {};
+  
   String getThumbnailUrl(String filePath) {
     if (_connectedService == null) return '';
+    
+    // For relay mode, return a special URL that won't actually be used
+    // The UI will need to handle this differently
+    if (_usingRelay) {
+      return 'relay:thumbnail:${Uri.encodeComponent(filePath)}';
+    }
+    
     return 'http://${_connectedService!.host}:${_connectedService!.port}/thumbnail?path=${Uri.encodeComponent(filePath)}';
+  }
+  
+  /// Get thumbnail bytes for relay mode
+  Future<Uint8List?> getThumbnailBytes(String filePath) async {
+    if (!_usingRelay) return null;
+    
+    // Check cache first
+    if (_relayThumbnailCache.containsKey(filePath)) {
+      return _relayThumbnailCache[filePath];
+    }
+    
+    try {
+      // Build HTTP request for thumbnail
+      final requestLine = 'GET /thumbnail?path=${Uri.encodeComponent(filePath)} HTTP/1.1\r\n\r\n';
+      final requestData = base64.encode(utf8.encode(requestLine));
+      
+      debugPrint('Fetching thumbnail via relay: $filePath');
+      
+      // Send through relay
+      final responseData = await _relayConnection!.sendRequest(requestData);
+      
+      // Decode response - thumbnails are binary, not encrypted
+      final thumbnailBytes = base64.decode(responseData);
+      
+      // Cache it
+      _relayThumbnailCache[filePath] = thumbnailBytes;
+      
+      return thumbnailBytes;
+    } catch (e) {
+      debugPrint('Error fetching thumbnail via relay: $e');
+      return null;
+    }
   }
 
   Future<bool> createFolder(String currentPath, String folderName) async {
