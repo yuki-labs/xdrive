@@ -394,6 +394,12 @@ class RemoteFileProvider extends ChangeNotifier {
 
   String getStreamUrl(String filePath) {
     if (_connectedService == null) return '';
+    
+    // For relay mode, return special URL
+    if (_usingRelay) {
+      return 'relay:stream:${Uri.encodeComponent(filePath)}';
+    }
+    
     return 'http://${_connectedService!.host}:${_connectedService!.port}/stream?path=${Uri.encodeComponent(filePath)}';
   }
 
