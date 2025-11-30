@@ -216,13 +216,20 @@ class FileServer {
           method,
           Uri.http('localhost', '/thumbnail', queryParams),
         ));
+      } else if (uri.path == '/stream') {
+        final queryParams = uri.queryParameters;
+        response = await _fileHandlers.handleStreamFile(Request(
+          method,
+          Uri.http('localhost', '/stream', queryParams),
+        ));
       } else {
         response = Response.notFound('Not found');
       }
       
       // Read response - handle both text and binary
       final contentType = response.headers['content-type'] ?? '';
-      final responseData = contentType.startsWith('image/')
+      final isBinary = contentType.startsWith('image/') || contentType.startsWith('video/');
+      final responseData = isBinary
           ? base64.encode(await response.read().toList().then((chunks) => 
               chunks.expand((chunk) => chunk).toList()))
           : base64.encode(utf8.encode(await response.readAsString()));

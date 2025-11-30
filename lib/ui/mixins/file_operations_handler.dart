@@ -348,7 +348,7 @@ mixin FileOperationsHandler<T extends StatefulWidget> on State<T> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ImageViewerView(imageUrl: url, fileName: file.name),
+          builder: (_) => ImageViewerView(imageUrl: url, fileName: file.name, filePath: file.path),
         ),
       );
     }
