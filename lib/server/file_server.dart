@@ -58,7 +58,7 @@ class FileServer {
       thumbnailGenerator: _thumbnailGenerator,
     );
     
-    _tagHandlers = TagHandlers(tagDb: _tagDb);
+    _tagHandlers = TagHandlers(tagDb: _tagDb, encryptionKey: _encryptionKey);
     _fileOpsHandlers = FileOperationsHandlers(rootDirectory: _rootDirectory);
     
     // Setup router

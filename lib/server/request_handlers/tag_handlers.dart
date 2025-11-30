@@ -1,21 +1,22 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:shelf/shelf.dart';
 import '../../storage/tag_database.dart';
+import '../utils/encryption_helper.dart';
 
 /// Handles tag-related HTTP requests
 class TagHandlers {
   final TagDatabase tagDb;
+  final Uint8List? encryptionKey;
 
-  TagHandlers({required this.tagDb});
+  TagHandlers({required this.tagDb, this.encryptionKey});
 
   /// Handle GET /tags/{hash}
   Future<Response> handleGetTagsForHash(Request request, String hash) async {
     try {
       final tags = await tagDb.getTags(hash);
-      return Response.ok(
-        jsonEncode({'hash': hash, 'tags': tags}),
-        headers: {'content-type': 'application/json'},
-      );
+      final jsonBody = jsonEncode({'hash': hash, 'tags': tags});
+      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
     } catch (e) {
       print('Error getting tags for hash: $e');
       return Response.internalServerError(body: 'Error: $e');
@@ -37,7 +38,8 @@ class TagHandlers {
       await tagDb.addTag(hash, tag);
       print('Added tag "$tag" to hash $hash on server');
       
-      return Response.ok(jsonEncode({'success': true}));
+      final jsonBody = jsonEncode({'success': true});
+      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
     } catch (e) {
       print('Error adding tag: $e');
       return Response.internalServerError(body: 'Error: $e');
@@ -59,7 +61,8 @@ class TagHandlers {
       await tagDb.removeTag(hash, tag);
       print('Removed tag "$tag" from hash $hash on server');
       
-      return Response.ok(jsonEncode({'success': true}));
+      final jsonBody = jsonEncode({'success': true});
+      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
     } catch (e) {
       print('Error removing tag: $e');
       return Response.internalServerError(body: 'Error: $e');
@@ -88,10 +91,8 @@ class TagHandlers {
         }
       }
       
-      return Response.ok(
-        jsonEncode({'hashTags': hashTagsMap}),
-        headers: {'content-type': 'application/json'},
-      );
+      final jsonBody = jsonEncode({'hashTags': hashTagsMap});
+      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
     } catch (e) {
       print('Error getting all tagged hashes: $e');
       return Response.internalServerError(body: 'Error: $e');

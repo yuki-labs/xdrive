@@ -108,7 +108,7 @@ class RemoteFileProvider extends ChangeNotifier {
   }
   
   /// Connect via relay server for internet access
-  Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'ws://localhost:8081'}) async {
+  Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
     try {
       debugPrint('Connecting via relay to room: $roomId');
       
@@ -338,6 +338,43 @@ class RemoteFileProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error fetching via relay: $e');
+    }
+  }
+  
+  /// Generic HTTP request via relay
+  Future<String?> _httpViaRelay(String method, String path) async {
+    if (!_usingRelay || _relayConnection == null) {
+      return null;
+    }
+    
+    try {
+      // Build HTTP request
+      final requestLine = '$method $path HTTP/1.1\r\n\r\n';
+      final requestData = base64.encode(utf8.encode(requestLine));
+      
+      debugPrint('Sending $method via relay: $path');
+      
+      // Send through relay
+      final responseData = await _relayConnection!.sendRequest(requestData);
+      
+      // Decode response
+      final responseBytes = base64.decode(responseData);
+      String bodyText = utf8.decode(responseBytes);
+      
+      // Decrypt if needed
+      if (_encryptionKey != null) {
+        final decrypted = EncryptionService.decryptString(bodyText, _encryptionKey!);
+        if (decrypted == null) {
+          debugPrint('Failed to decrypt relay response for $path');
+          return null;
+        }
+        bodyText = decrypted;
+      }
+      
+      return bodyText;
+    } catch (e) {
+      debugPrint('Error in HTTP via relay: $e');
+      return null;
     }
   }
   
@@ -815,42 +852,59 @@ class RemoteFileProvider extends ChangeNotifier {
     if (_connectedService == null) return;
     
     try {
-      final host = _connectedService!.host;
-      final port = _connectedService!.port;
+      String? responseBody;
       
-      // Get all hash->tags from server
-      final uri = Uri.http('$host:$port', '/tags/all-hashes');
-      final response = await http.get(uri);
-      
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final hashTagsMap = Map<String, List<dynamic>>.from(data['hashTags'] ?? {});
+      // Use relay or direct HTTP depending on connection mode
+      if (_usingRelay) {
+        debugPrint('Syncing tags via relay...');
+        responseBody = await _httpViaRelay('GET', '/tags/all-hashes');
+      } else {
+        final host = _connectedService!.host;
+        final port = _connectedService!.port;
         
-        // Merge with local database (server wins)
-        for (final entry in hashTagsMap.entries) {
-          final hash = entry.key;
-          final serverTags = List<String>.from(entry.value);
+        // Get all hash->tags from server
+        final uri = Uri.http('$host:$port', '/tags/all-hashes');
+        final response = await http.get(uri);
+        
+        if (response.statusCode == 200) {
+          responseBody = response.body;
           
-          // Get current local tags
-          final localTags = await _tagDb.getTags(hash);
-          
-          // Remove local tags not on server
-          for (final tag in localTags) {
-            if (!serverTags.contains(tag)) {
-              await _tagDb.removeTag(hash, tag);
-            }
+          // Decrypt if encrypted
+          if (response.headers['x-encrypted'] == 'true' && _encryptionKey != null) {
+            responseBody = EncryptionService.decryptString(responseBody, _encryptionKey!);
           }
-          
-          // Add server tags not in local
-          for (final tag in serverTags) {
-            if (!localTags.contains(tag)) {
-              await _tagDb.addTag(hash, tag);
-            }
+        }
+      }
+      
+      if (responseBody == null) return;
+      
+      final data = jsonDecode(responseBody);
+      final hashTagsMap = Map<String, List<dynamic>>.from(data['hashTags'] ?? {});
+      
+      // Merge with local database (server wins)
+      for (final entry in hashTagsMap.entries) {
+        final hash = entry.key;
+        final serverTags = List<String>.from(entry.value);
+        
+        // Get current local tags
+        final localTags = await _tagDb.getTags(hash);
+        
+        // Remove local tags not on server
+        for (final tag in localTags) {
+          if (!serverTags.contains(tag)) {
+            await _tagDb.removeTag(hash, tag);
           }
         }
         
-        debugPrint('Synced tags from server');
+        // Add server tags not in local
+        for (final tag in serverTags) {
+          if (!localTags.contains(tag)) {
+            await _tagDb.addTag(hash, tag);
+          }
+        }
       }
+      
+      debugPrint('Synced tags from server');
     } catch (e) {
       debugPrint('Error syncing tags from server: $e');
     }
