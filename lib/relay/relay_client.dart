@@ -8,6 +8,7 @@ import 'room_id_generator.dart';
 class RelayClient {
   WebSocketChannel? _channel;
   String? _roomId;
+  StreamSubscription? _streamSubscription; // Store subscription
   final String relayUrl;
   
   final StreamController<Map<String, dynamic>> _messageController = 
@@ -33,7 +34,8 @@ class RelayClient {
       // Listen for response
       final completer = Completer<String>();
       
-      _channel!.stream.listen(
+      // Store the subscription to prevent garbage collection
+      _streamSubscription = _channel!.stream.listen(
         (message) {
           debugPrint('Received message from relay: $message');
           final msg = jsonDecode(message) as Map<String, dynamic>;
@@ -44,25 +46,37 @@ class RelayClient {
             if (!completer.isCompleted) {
               completer.complete(_roomId!);
             }
+          } else if (msg['type'] == 'ping') {
+            // Respond to ping to keep connection alive
+            _channel?.sink.add(jsonEncode({'type': 'pong'}));
           } else {
             // Forward other messages to listeners
             _messageController.add(msg);
           }
         },
-        onError: (error) {
-          debugPrint('Relay WebSocket error: $error');
+        onError: (error, stackTrace) {
+          debugPrint('❌ Relay WebSocket error: $error');
+          debugPrint('Stack trace: $stackTrace');
           if (!completer.isCompleted) {
             completer.completeError(error);
           }
         },
         onDone: () {
-          debugPrint('Relay WebSocket closed');
+          debugPrint('⚠️ Relay WebSocket onDone called - connection closed!');
+          debugPrint('Room ID was: $_roomId');
+          debugPrint('Channel state: ${_channel != null ? "not null" : "null"}');
           _channel = null;
           _roomId = null;
         },
+        cancelOnError: false, // Don't cancel on errors
       );
       
-      return completer.future;
+      final roomId = await completer.future;
+      
+      // Give the WebSocket a moment to fully establish
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      return roomId;
     } catch (e) {
       debugPrint('Failed to register as host: $e');
       rethrow;
@@ -88,6 +102,8 @@ class RelayClient {
   
   /// Disconnect from relay server
   Future<void> disconnect() async {
+    await _streamSubscription?.cancel();
+    _streamSubscription = null;
     await _channel?.sink.close();
     _channel = null;
     _roomId = null;

@@ -50,6 +50,9 @@ class RelayConnection {
               _pendingRequests[requestId]!.complete(data);
               _pendingRequests.remove(requestId);
             }
+          } else if (msg['type'] == 'ping') {
+            // Respond to ping to keep connection alive
+            _channel?.sink.add(jsonEncode({'type': 'pong'}));
           } else {
             // Forward other messages to listeners
             _messageController.add(msg);

@@ -37,6 +37,14 @@ function findRoomForSocket(ws) {
 wss.on('connection', (ws) => {
   console.log('New connection established');
 
+  // Initialize heartbeat
+  ws.isAlive = true;
+
+  // Handle WebSocket-level pong responses  
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
