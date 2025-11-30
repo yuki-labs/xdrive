@@ -398,24 +398,6 @@ class RemoteFileProvider extends ChangeNotifier {
   }
 
   // Cache for relay thumbnails (path -> image bytes)
-  final Map<String, Uint8List> _relayThumbnailCache = {};
-  
-  String getThumbnailUrl(String filePath) {
-    if (_connectedService == null) return '';
-    
-    // For relay mode, return a special URL that won't actually be used
-    // The UI will need to handle this differently
-    if (_usingRelay) {
-      return 'relay:thumbnail:${Uri.encodeComponent(filePath)}';
-    }
-    
-    return 'http://${_connectedService!.host}:${_connectedService!.port}/thumbnail?path=${Uri.encodeComponent(filePath)}';
-  }
-  
-  /// Get thumbnail bytes for relay mode
-  Future<Uint8List?> getThumbnailBytes(String filePath) async {
-    if (!_usingRelay) return null;
-    
     // Check cache first
     if (_relayThumbnailCache.containsKey(filePath)) {
       return _relayThumbnailCache[filePath];
