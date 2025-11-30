@@ -443,6 +443,32 @@ class RemoteFileProvider extends ChangeNotifier {
       return null;
     }
   }
+  
+  /// Get full file bytes for relay mode (images/videos)
+  Future<Uint8List?> getStreamBytes(String filePath) async {
+    if (!_usingRelay) return null;
+    
+    try {
+      // Build HTTP request for streaming
+      final requestLine = 'GET /stream?path=${Uri.encodeComponent(filePath)} HTTP/1.1\r\n\r\n';
+      final requestData = base64.encode(utf8.encode(requestLine));
+      
+      debugPrint('Fetching file via relay: $filePath');
+      
+      // Send through relay
+      final responseData = await _relayConnection!.sendRequest(requestData);
+      
+      // Decode response - files are binary, not encrypted
+      final fileBytes = base64.decode(responseData);
+      
+      debugPrint('Received file via relay: ${fileBytes.length} bytes');
+      
+      return fileBytes;
+    } catch (e) {
+      debugPrint('Error fetching file via relay: $e');
+      return null;
+    }
+  }
 
   Future<bool> createFolder(String currentPath, String folderName) async {
     if (_connectedService == null) return false;
