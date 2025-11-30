@@ -210,12 +210,22 @@ class FileServer {
           method,
           Uri.http('localhost', '/tags/all-hashes'),
         ));
+      } else if (uri.path == '/thumbnail') {
+        final queryParams = uri.queryParameters;
+        response = await _fileHandlers.handleGetThumbnail(Request(
+          method,
+          Uri.http('localhost', '/thumbnail', queryParams),
+        ));
       } else {
         response = Response.notFound('Not found');
       }
       
-      final responseBody = await response.readAsString();
-      final responseData = base64.encode(utf8.encode(responseBody));
+      // Read response - handle both text and binary
+      final contentType = response.headers['content-type'] ?? '';
+      final responseData = contentType.startsWith('image/')
+          ? base64.encode(await response.read().toList().then((chunks) => 
+              chunks.expand((chunk) => chunk).toList()))
+          : base64.encode(utf8.encode(await response.readAsString()));
       
       _relayClient!.sendResponse(requestId, responseData);
       debugPrint('Sent response for request $requestId');

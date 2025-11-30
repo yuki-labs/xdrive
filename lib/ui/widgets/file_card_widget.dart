@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../models/file_item.dart';
 import '../../client/remote_file_provider.dart';
@@ -262,6 +263,44 @@ class FileCardWidget extends StatelessWidget {
   Widget _buildThumbnail(IconData fallbackIcon, Color iconColor) {
     final thumbnailUrl = provider.getThumbnailUrl(file.path);
     
+    // Check if using relay mode
+    if (thumbnailUrl.startsWith('relay:')) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 64,
+          height: 64,
+          child: FutureBuilder<Uint8List?>(
+            future: provider.getThumbnailBytes(file.path),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.done) {
+                if (snapshot.hasData && snapshot.data != null) {
+                  return Image.memory(
+                    snapshot.data!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Icon(fallbackIcon, size: 48, color: iconColor);
+                    },
+                  );
+                } else {
+                  return Icon(fallbackIcon, size: 48, color: iconColor);
+                }
+              } else {
+                return Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      );
+    }
+    
+    // Normal HTTP mode
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
