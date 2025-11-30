@@ -1,0 +1,224 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart' as shelf_io;
+import 'package:shelf_router/shelf_router.dart';
+import 'package:mime/mime.dart';
+import '../models/file_item.dart';
+import '../utils/hash_utils.dart';
+
+class FileServer {
+  HttpServer? _server;
+  final int port;
+  String? _rootDirectory;
+
+  FileServer({this.port = 8080});
+
+  Future<void> start({String? rootDirectory}) async {
+    _rootDirectory = rootDirectory;
+    
+    final router = Router();
+
+    router.get('/files', _handleGetFiles);
+    router.get('/stream', _handleStreamFile);
+    router.get('/file-hash', _handleGetFileHash);
+    router.post('/create', _handleCreateItem);
+    router.post('/delete', _handleDeleteItem);
+    router.post('/move', _handleMoveItem);
+    router.post('/upload', _handleUploadFile);
+
+    final handler = Pipeline()
+        .addMiddleware(logRequests())
+        .addHandler(router.call);
+
+    _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
+    debugPrint('Server running on port ${_server!.port}');
+    if (_rootDirectory != null) {
+      debugPrint('Serving files from: $_rootDirectory');
+    }
+  }
+
+  Future<void> stop() async {
+    await _server?.close();
+    _server = null;
+  }
+
+  void updateRootDirectory(String newRootDirectory) {
+    _rootDirectory = newRootDirectory;
+    debugPrint('Updated server root directory to: $newRootDirectory');
+  }
+
+  Future<Response> _handleGetFiles(Request request) async {
+    final queryParams = request.url.queryParameters;
+    String path = queryParams['path'] ?? _rootDirectory ?? Directory.current.path;
+
+    if (path == '/' || path == '\\') {
+      path = _rootDirectory ?? Directory.current.path;
+    }
+
+    final dir = Directory(path);
+    if (!await dir.exists()) {
+      return Response.notFound('Directory not found');
+    }
+
+    try {
+      final entities = await dir.list().toList();
+      final fileItems = <FileItem>[];
+
+      for (var entity in entities) {
+        final stat = await entity.stat();
+        fileItems.add(FileItem(
+          path: entity.path,
+          name: entity.path.split(Platform.pathSeparator).last,
+          type: entity is Directory ? FileType.directory : FileType.file,
+          size: stat.size,
+        ));
+      }
+
+      return Response.ok(
+        jsonEncode(fileItems.map((e) => e.toJson()).toList()),
+        headers: {'content-type': 'application/json'},
+      );
+    } catch (e) {
+      return Response.internalServerError(body: 'Error listing directory: $e');
+    }
+  }
+
+  Future<Response> _handleStreamFile(Request request) async {
+    final queryParams = request.url.queryParameters;
+    final path = queryParams['path'];
+
+    if (path == null) {
+      return Response.badRequest(body: 'Missing path parameter');
+    }
+      final isDirectory = data['isDirectory'] as bool? ?? true;
+
+      if (path == null || name == null) {
+        return Response.badRequest(body: 'Missing path or name');
+      }
+
+      // Normalize the path - if it's '/' or '\', use the root directory
+      String basePath = path;
+      if (basePath == '/' || basePath == '\\') {
+        basePath = _rootDirectory ?? Directory.current.path;
+      }
+
+      // Create the full path using proper path joining
+      final fullPath = '$basePath${Platform.pathSeparator}$name';
+      debugPrint('Creating item at: $fullPath');
+
+      if (isDirectory) {
+        final dir = Directory(fullPath);
+        await dir.create();
+        debugPrint('Created directory: $fullPath');
+      } else {
+        final file = File(fullPath);
+        await file.create();
+        debugPrint('Created file: $fullPath');
+      }
+
+      return Response.ok(jsonEncode({'success': true, 'path': fullPath}));
+    } catch (e) {
+      debugPrint('Error creating item: $e');
+      return Response.internalServerError(body: 'Error: $e');
+    }
+  }
+
+  Future<Response> _handleDeleteItem(Request request) async {
+    try {
+      final body = await request.readAsString();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final path = data['path'] as String?;
+
+      if (path == null) {
+        return Response.badRequest(body: 'Missing path');
+      }
+
+      final file = File(path);
+      final dir = Directory(path);
+
+      if (await file.exists()) {
+        await file.delete();
+        debugPrint('Deleted file: $path');
+      } else if (await dir.exists()) {
+        await dir.delete(recursive: true);
+        debugPrint('Deleted directory: $path');
+      } else {
+        return Response.notFound('Item not found');
+      }
+
+      return Response.ok(jsonEncode({'success': true}));
+    } catch (e) {
+      debugPrint('Error deleting item: $e');
+      return Response.internalServerError(body: 'Error: $e');
+    }
+  }
+
+  Future<Response> _handleMoveItem(Request request) async {
+    try {
+      final body = await request.readAsString();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final oldPath = data['oldPath'] as String?;
+      final newPath = data['newPath'] as String?;
+
+      if (oldPath == null || newPath == null) {
+        return Response.badRequest(body: 'Missing oldPath or newPath');
+      }
+
+      final file = File(oldPath);
+      final dir = Directory(oldPath);
+
+      if (await file.exists()) {
+        await file.rename(newPath);
+        debugPrint('Moved file: $oldPath -> $newPath');
+      } else if (await dir.exists()) {
+        await dir.rename(newPath);
+        debugPrint('Moved directory: $oldPath -> $newPath');
+      } else {
+        return Response.notFound('Item not found');
+      }
+
+      return Response.ok(jsonEncode({'success': true}));
+    } catch (e) {
+      debugPrint('Error moving item: $e');
+      return Response.internalServerError(body: 'Error: $e');
+    }
+  }
+
+  Future<Response> _handleUploadFile(Request request) async {
+    try {
+      final contentLength = request.headers['content-length'];
+      if (contentLength == null) {
+        return Response.badRequest(body: 'Missing content-length header');
+      }
+
+      final queryParams = request.url.queryParameters;
+      final path = queryParams['path'];
+      final filename = queryParams['filename'];
+
+      if (path == null || filename == null) {
+        return Response.badRequest(body: 'Missing path or filename parameter');
+      }
+
+      final fullPath = '$path${Platform.pathSeparator}$filename';
+      final file = File(fullPath);
+
+      // Create parent directories if they don't exist
+      await file.parent.create(recursive: true);
+
+      // Write the uploaded content to the file
+      final sink = file.openWrite();
+      await request.read().forEach((chunk) {
+        sink.add(chunk);
+      });
+      await sink.close();
+
+      debugPrint('Uploaded file: $fullPath');
+      return Response.ok(jsonEncode({'success': true, 'path': fullPath}));
+    } catch (e) {
+      debugPrint('Error uploading file: $e');
+      return Response.internalServerError(body: 'Error: $e');
+    }
+  }
+}
