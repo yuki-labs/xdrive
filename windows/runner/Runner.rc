@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.antigravity.spacedrive" "\0"
-            VALUE "FileDescription", "spacedrive_attempt" "\0"
+            VALUE "FileDescription", "xDrive File Manager" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "spacedrive_attempt" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.antigravity.spacedrive. All rights reserved." "\0"
             VALUE "OriginalFilename", "spacedrive_attempt.exe" "\0"
-            VALUE "ProductName", "spacedrive_attempt" "\0"
+            VALUE "ProductName", "xDrive File Manager" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

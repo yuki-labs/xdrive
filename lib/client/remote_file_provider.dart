@@ -116,7 +116,7 @@ class RemoteFileProvider with ChangeNotifier {
   String getStreamUrl(String filePath) => _browser.getStreamUrl(filePath);
   String getThumbnailUrl(String filePath) => _browser.getThumbnailUrl(filePath);
   Future<Uint8List?> getThumbnailBytes(String filePath) => _browser.getThumbnailBytes(filePath);
-  Future<Uint8List?> getStreamBytes(String filePath) => _browser.getStreamBytes(fil ePath);
+  Future<Uint8List?> getStreamBytes(String filePath) => _browser.getStreamBytes(filePath);
   String? getProxyUrl(String filePath) => _browser.getProxyUrl(filePath);
   
   // === File Operations ===

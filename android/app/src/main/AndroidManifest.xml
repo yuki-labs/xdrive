@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <application
-        android:label="spacedrive_attempt"
+        android:label="xDrive File Manager"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

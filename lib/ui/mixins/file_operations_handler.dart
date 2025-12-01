@@ -324,7 +324,16 @@ mixin FileOperationsHandler<T extends StatefulWidget> on State<T> {
     
     // Video files - comprehensive format support
     if (['mp4', 'mkv', 'mov', 'avi', 'wmv', 'flv', 'webm', 'm4v', '3gp', '3g2', 'vob', 'ts', 'mts', 'm2ts', 'mpg', 'mpeg', 'ogv'].contains(ext)) {
-      final url = provider.getStreamUrl(file.path);
+      // Try to get proxy URL first (for relay mode), fallback to stream URL
+      final url = provider.getProxyUrl(file.path) ?? provider.getStreamUrl(file.path);
+      
+      if (url.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cannot play video - not connected')),
+        );
+        return;
+      }
+      
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -334,7 +343,16 @@ mixin FileOperationsHandler<T extends StatefulWidget> on State<T> {
     }
     // Audio files
     else if (['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg', 'wma', 'opus', 'ape', 'alac', 'aiff', 'aif', 'aifc', 'caf', 'ac3', 'amr', 'oga', 'mogg', 'wv', 'mka'].contains(ext)) {
-      final url = provider.getStreamUrl(file.path);
+      // Try to get proxy URL first (for relay mode), fallback to stream URL
+      final url = provider.getProxyUrl(file.path) ?? provider.getStreamUrl(file.path);
+      
+      if (url.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cannot play audio - not connected')),
+        );
+        return;
+      }
+      
       Navigator.push(
         context,
         MaterialPageRoute(
