@@ -58,7 +58,7 @@ class FileHandlers {
     }
   }
 
-  /// Handle GET /stream request
+  /// Handle GET /stream request with range support for chunked streaming
   Future<Response> handleStreamFile(Request request) async {
     final queryParams = request.url.queryParameters;
     final path = queryParams['path'];
@@ -72,13 +72,49 @@ class FileHandlers {
       return Response.notFound('File not found');
     }
 
+    final fileLength = await file.length();
     final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
-
+    
+    // Check for range request
+    final rangeHeader = request.headers['range'];
+    
+    if (rangeHeader != null) {
+      // Parse range header: "bytes=0-1000" or "bytes=1000-"
+      final match = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(rangeHeader);
+      
+      if (match != null) {
+        final start = int.parse(match.group(1)!);
+        final endStr = match.group(2);
+        final end = endStr != null && endStr.isNotEmpty 
+            ? int.parse(endStr) 
+            : fileLength - 1;
+        
+        if (start >= fileLength || end >= fileLength || start > end) {
+          return Response(416, body: 'Requested range not satisfiable');
+        }
+        
+        final length = end - start + 1;
+        
+        // Return partial content (stream the chunk)
+        return Response(206,
+          body: file.openRead(start, end + 1),
+          headers: {
+            'content-type': mimeType,
+            'content-length': '$length',
+            'content-range': 'bytes $start-$end/$fileLength',
+            'accept-ranges': 'bytes',
+          },
+        );
+      }
+    }
+    
+    // No range request, return full file stream
     return Response.ok(
       file.openRead(),
       headers: {
         'content-type': mimeType,
-        'content-length': '${await file.length()}',
+        'content-length': '$fileLength',
+        'accept-ranges': 'bytes',
       },
     );
   }
