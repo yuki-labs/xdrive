@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/file_item.dart';
 import '../crypto/encryption_service.dart';
 import '../relay/relay_connection.dart';
+import '../relay/local_proxy_server.dart';
 
 /// Manages file browsing, listing, and relay operations
 class FileBrowserManager with ChangeNotifier {
@@ -19,6 +20,9 @@ class FileBrowserManager with ChangeNotifier {
   
   // Relay thumbnail cache
   final Map<String, Uint8List> _relayThumbnailCache = {};
+  
+  // Local proxy server for video streaming
+  LocalProxyServer? _proxyServer;
   
   final nsd.Service? Function() _getConnectedService;
   final bool Function() _isUsingRelay;
@@ -265,5 +269,44 @@ class FileBrowserManager with ChangeNotifier {
       debugPrint('Error in HTTP via relay: $e');
       return null;
     }
+  }
+  
+  /// Start local proxy server for video streaming over relay
+  Future<void> startProxyServer() async {
+    if (_proxyServer != null) return; // Already running
+    
+    if (!_isUsingRelay()) return; // Only needed for relay
+    
+    try {
+      _proxyServer = LocalProxyServer(
+        fetchViaRelay: (path) => getStreamBytes(path),
+      );
+      
+      final baseUrl = await _proxyServer!.start();
+      debugPrint('Local proxy server started: $baseUrl');
+    } catch (e) {
+      debugPrint('Failed to start proxy server: $e');
+    }
+  }
+  
+  /// Stop local proxy server
+  Future<void> stopProxyServer() async {
+    if (_proxyServer != null) {
+      await _proxyServer!.stop();
+      _proxyServer = null;
+      debugPrint('Local proxy server stopped');
+    }
+  }
+  
+  /// Get proxy URL for video file (for media players)
+  String? getProxyUrl(String filePath) {
+    if (_proxyServer == null) return null;
+    return _proxyServer!.getProxyUrl(filePath);
+  }
+  
+  @override
+  void dispose() {
+    stopProxyServer();
+    super.dispose();
   }
 }
