@@ -4,24 +4,23 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:nsd/nsd.dart' as nsd;
 
-/// Handles file and folder operations (create, delete, rename, move, upload)
+/// Manages file and folder operations (create, delete, rename, move, upload)
 class FileOperationsManager {
-  nsd.Service? _connectedService;
-  Function(String)? _refreshCallback;
+  final nsd.Service? Function() _getConnectedService;
+  final Future<void> Function(String path) _refreshFiles;
   
-  void setConnection(nsd.Service? service) {
-    _connectedService = service;
-  }
-  
-  void setRefreshCallback(Function(String) callback) {
-    _refreshCallback = callback;
-  }
+  FileOperationsManager({
+    required nsd.Service? Function() getConnectedService,
+    required Future<void> Function(String path) refreshFiles,
+  })  : _getConnectedService = getConnectedService,
+        _refreshFiles = refreshFiles;
 
   Future<bool> createFolder(String currentPath, String folderName) async {
-    if (_connectedService == null) return false;
+    final service = _getConnectedService();
+    if (service == null) return false;
 
     try {
-      final url = 'http://${_connectedService!.host}:${_connectedService!.port}/create';
+      final url = 'http://${service.host}:${service.port}/create';
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -33,7 +32,7 @@ class FileOperationsManager {
       );
 
       if (response.statusCode == 200) {
-        await _refreshCallback?.call(currentPath);
+        await _refreshFiles(currentPath);
         return true;
       }
       return false;
@@ -44,10 +43,11 @@ class FileOperationsManager {
   }
 
   Future<bool> createTextFile(String currentPath, String fileName) async {
-    if (_connectedService == null) return false;
+    final service = _getConnectedService();
+    if (service == null) return false;
 
     try {
-      final url = 'http://${_connectedService!.host}:${_connectedService!.port}/create';
+      final url = 'http://${service.host}:${service.port}/create';
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -59,7 +59,7 @@ class FileOperationsManager {
       );
 
       if (response.statusCode == 200) {
-        await _refreshCallback?.call(currentPath);
+        await _refreshFiles(currentPath);
         return true;
       }
       return false;
@@ -70,10 +70,11 @@ class FileOperationsManager {
   }
 
   Future<bool> deleteItem(String path, String currentPath) async {
-    if (_connectedService == null) return false;
+    final service = _getConnectedService();
+    if (service == null) return false;
 
     try {
-      final url = 'http://${_connectedService!.host}:${_connectedService!.port}/delete';
+      final url = 'http://${service.host}:${service.port}/delete';
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -81,7 +82,7 @@ class FileOperationsManager {
       );
 
       if (response.statusCode == 200) {
-        await _refreshCallback?.call(currentPath);
+        await _refreshFiles(currentPath);
         return true;
       }
       return false;
@@ -92,7 +93,8 @@ class FileOperationsManager {
   }
 
   Future<bool> renameItem(String oldPath, String newName, String currentPath) async {
-    if (_connectedService == null) return false;
+    final service = _getConnectedService();
+    if (service == null) return false;
 
     try {
       // Detect separator from the path itself (works cross-platform)
@@ -120,7 +122,7 @@ class FileOperationsManager {
               ? '$separator$newName'
               : '$directory$separator$newName';
 
-      final url = 'http://${_connectedService!.host}:${_connectedService!.port}/move';
+      final url = 'http://${service.host}:${service.port}/move';
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -131,7 +133,7 @@ class FileOperationsManager {
       );
 
       if (response.statusCode == 200) {
-        await _refreshCallback?.call(currentPath);
+        await _refreshFiles(currentPath);
         return true;
       }
       return false;
@@ -142,10 +144,11 @@ class FileOperationsManager {
   }
 
   Future<bool> moveItem(String oldPath, String newPath, String currentPath) async {
-    if (_connectedService == null) return false;
+    final service = _getConnectedService();
+    if (service == null) return false;
 
     try {
-      final url = 'http://${_connectedService!.host}:${_connectedService!.port}/move';
+      final url = 'http://${service.host}:${service.port}/move';
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -156,7 +159,7 @@ class FileOperationsManager {
       );
 
       if (response.statusCode == 200) {
-        await _refreshCallback?.call(currentPath);
+        await _refreshFiles(currentPath);
         return true;
       }
       return false;
@@ -167,13 +170,14 @@ class FileOperationsManager {
   }
 
   Future<bool> uploadFile(String filePath, String remotePath, String fileName) async {
-    if (_connectedService == null) return false;
+    final service = _getConnectedService();
+    if (service == null) return false;
 
     try {
       final file = File(filePath);
       if (!await file.exists()) return false;
 
-      final url = 'http://${_connectedService!.host}:${_connectedService!.port}/upload?path=${Uri.encodeComponent(remotePath)}&filename=${Uri.encodeComponent(fileName)}';
+      final url = 'http://${service.host}:${service.port}/upload?path=${Uri.encodeComponent(remotePath)}&filename=${Uri.encodeComponent(fileName)}';
       
       final request = http.StreamedRequest('POST', Uri.parse(url));
       final fileLength = await file.length();
@@ -191,7 +195,7 @@ class FileOperationsManager {
 
       final response = await request.send();
       if (response.statusCode == 200) {
-        await _refreshCallback?.call(remotePath);
+        await _refreshFiles(remotePath);
         return true;
       }
       return false;
