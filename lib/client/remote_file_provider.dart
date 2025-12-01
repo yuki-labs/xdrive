@@ -88,6 +88,8 @@ class RemoteFileProvider with ChangeNotifier {
   
   Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
     await _connection.connectViaRelay(roomId, passphrase, relayUrl: relayUrl);
+    // Start proxy server for video streaming
+    await _browser.startProxyServer();
     // Fetch initial files after relay connection
     await _browser.fetchFiles('/');
     notifyListeners();
@@ -114,7 +116,8 @@ class RemoteFileProvider with ChangeNotifier {
   String getStreamUrl(String filePath) => _browser.getStreamUrl(filePath);
   String getThumbnailUrl(String filePath) => _browser.getThumbnailUrl(filePath);
   Future<Uint8List?> getThumbnailBytes(String filePath) => _browser.getThumbnailBytes(filePath);
-  Future<Uint8List?> getStreamBytes(String filePath) => _browser.getStreamBytes(filePath);
+  Future<Uint8List?> getStreamBytes(String filePath) => _browser.getStreamBytes(fil ePath);
+  String? getProxyUrl(String filePath) => _browser.getProxyUrl(filePath);
   
   // === File Operations ===
   
