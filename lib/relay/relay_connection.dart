@@ -101,11 +101,12 @@ class RelayConnection {
     _channel!.sink.add(message);
     debugPrint('Sent request $requestId');
     
-    // Set timeout
-    Future.delayed(const Duration(seconds: 30), () {
+    
+    // Set timeout - longer for large files (videos)
+    Future.delayed(const Duration(minutes: 5), () {
       if (_pendingRequests.containsKey(requestId)) {
         _pendingRequests[requestId]!.completeError(
-          TimeoutException('Request timed out', const Duration(seconds: 30))
+          TimeoutException('Request timed out', const Duration(minutes: 5))
         );
         _pendingRequests.remove(requestId);
       }

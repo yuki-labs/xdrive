@@ -84,7 +84,6 @@ class FileServer {
 
     // File handlers
     router.get('/files', (Request request) => _fileHandlers.handleGetFiles(request));
-    router.get('/file-info', (Request request) => _fileHandlers.handleGetFileInfo(request));
     router.get('/stream', (Request request) => _fileHandlers.handleStreamFile(request));
     router.get('/thumbnail', (Request request) => _fileHandlers.handleGetThumbnail(request));
     

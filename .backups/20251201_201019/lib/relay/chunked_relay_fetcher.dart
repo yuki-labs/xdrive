@@ -16,29 +16,6 @@ class ChunkedRelayFetcher {
     required this.filePath,
   });
   
-  /// Get file metadata (size, mimeType) via /file-info endpoint
-  Future<Map<String, dynamic>?> getFileInfo() async {
-    try {
-      final requestLine = 'GET /file-info?path=${Uri.encodeComponent(filePath)} HTTP/1.1\r\n\r\n';
-      final requestData = base64.encode(utf8.encode(requestLine));
-      
-      debugPrint('Fetching file info for $filePath');
-      
-      final responseData = await relayConnection.sendRequest(requestData);
-      final responseBytes = base64.decode(responseData);
-      final responseText = utf8.decode(responseBytes);
-      
-      // Parse JSON response
-      final fileInfo = jsonDecode(responseText) as Map<String, dynamic>;
-      debugPrint('File info: size=${fileInfo['size']}, mimeType=${fileInfo['mimeType']}');
-      
-      return fileInfo;
-    } catch (e) {
-      debugPrint('Error fetching file info: $e');
-      return null;
-    }
-  }
-  
   /// Fetch chunk and return both data and headers
   Future<Map<String, dynamic>?> fetchChunkWithHeaders(int start, int end) async {
     try {
@@ -52,12 +29,40 @@ class ChunkedRelayFetcher {
       final responseData = await relayConnection.sendRequest(requestData);
       final responseBytes = base64.decode(responseData);
       
-      // Response is just binary data (no HTTP headers from relay)
-      debugPrint('Received chunk: ${responseBytes.length} bytes');
+      // Parse HTTP response to extract headers and body
+      final responseText = utf8.decode(responseBytes, allowMalformed: true);
+      final parts = responseText.split('\r\n\r\n');
+      
+      if (parts.length < 2) {
+        // Binary response without headers, just return data
+        debugPrint('Received chunk: ${responseBytes.length} bytes');
+        return {
+          'data': responseBytes,
+          'contentRange': null,
+        };
+      }
+      
+      // Parse headers
+      final headerLines = parts[0].split('\r\n');
+      String? contentRange;
+      
+      for (final line in headerLines) {
+        final lower = line.toLowerCase();
+        if (lower.startsWith('content-range:')) {
+          contentRange = line.substring(line.indexOf(':') + 1).trim();
+          debugPrint('Content-Range: $contentRange');
+        }
+      }
+      
+      // Body is everything after headers
+      final bodyStart = responseText.indexOf('\r\n\r\n') + 4;
+      final body = responseBytes.sublist(bodyStart);
+      
+      debugPrint('Received chunk: ${body.length} bytes');
       
       return {
-        'data': responseBytes,
-        'contentRange': null,
+        'data': body,
+        'contentRange': contentRange,
       };
     } catch (e) {
       debugPrint('Error fetching chunk: $e');

@@ -58,6 +58,36 @@ class FileHandlers {
     }
   }
 
+  /// Handle GET /file-info request - returns file metadata as JSON
+  Future<Response> handleGetFileInfo(Request request) async {
+    final queryParams = request.url.queryParameters;
+    final path = queryParams['path'];
+
+    if (path == null) {
+      return Response.badRequest(body: 'Missing path parameter');
+    }
+
+    final file = File(path);
+    if (!await file.exists()) {
+      return Response.notFound('File not found');
+    }
+
+    try {
+      final fileLength = await file.length();
+      final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
+      
+      final jsonBody = jsonEncode({
+        'size': fileLength,
+        'mimeType': mimeType,
+        'path': path,
+      });
+      
+      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
+    } catch (e) {
+      return Response.internalServerError(body: 'Error getting file info: $e');
+    }
+  }
+
   /// Handle GET /stream request with range support for chunked streaming
   Future<Response> handleStreamFile(Request request) async {
     final queryParams = request.url.queryParameters;
@@ -95,7 +125,7 @@ class FileHandlers {
         
         final length = end - start + 1;
         
-        // Return partial content (stream the chunk)
+        // Return partial content
         return Response(206,
           body: file.openRead(start, end + 1),
           headers: {
@@ -108,7 +138,7 @@ class FileHandlers {
       }
     }
     
-    // No range request, return full file stream
+    // No range request, return full file
     return Response.ok(
       file.openRead(),
       headers: {
