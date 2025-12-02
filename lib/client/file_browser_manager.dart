@@ -56,6 +56,7 @@ class FileBrowserManager with ChangeNotifier {
     _proxyManager = ProxyManager(
       getRelayConnection: getRelayConnection,
       isUsingRelay: isUsingRelay,
+      getEncryptionKey: getEncryptionKey,
     );
     _relayHelper = RelayFileHelper(
       getRelayConnection: getRelayConnection,

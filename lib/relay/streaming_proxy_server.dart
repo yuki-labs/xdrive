@@ -10,12 +10,16 @@ class StreamingProxyServer {
   HttpServer? _server;
   int? _port;
   final RelayConnection relayConnection;
+  final Uint8List? encryptionKey;
   
   // Cache file metadata
   int? _cachedFileSize;
   String? _cachedFilePath;
   
-  StreamingProxyServer({required this.relayConnection});
+  StreamingProxyServer({
+    required this.relayConnection,
+    this.encryptionKey,
+  });
   
   Future<String?> start() async {
     try {
@@ -48,10 +52,11 @@ class StreamingProxyServer {
       
       debugPrint('Streaming request for: $path');
       
-      // Create chunked fetcher
+      // Create chunked fetcher with encryption key
       final fetcher = ChunkedRelayFetcher(
         relayConnection: relayConnection,
         filePath: path,
+        encryptionKey: encryptionKey,
       );
       
       // Handle range requests

@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../relay/streaming_proxy_server.dart';
 import '../relay/relay_connection.dart';
@@ -8,12 +9,15 @@ class ProxyManager {
   
   final RelayConnection? Function() _getRelayConnection;
   final bool Function() _isUsingRelay;
+  final Uint8List? Function() _getEncryptionKey;
   
   ProxyManager({
     required RelayConnection? Function() getRelayConnection,
     required bool Function() isUsingRelay,
+    required Uint8List? Function() getEncryptionKey,
   })  : _getRelayConnection = getRelayConnection,
-        _isUsingRelay = isUsingRelay;
+        _isUsingRelay = isUsingRelay,
+        _getEncryptionKey = getEncryptionKey;
   
   /// Start streaming proxy server
   Future<void> startProxyServer() async {
@@ -27,7 +31,10 @@ class ProxyManager {
     }
     
     try {
-      _proxyServer = StreamingProxyServer(relayConnection: relayConnection);
+      _proxyServer = StreamingProxyServer(
+        relayConnection: relayConnection,
+        encryptionKey: _getEncryptionKey(),
+      );
       final baseUrl = await _proxyServer!.start();
       debugPrint('Streaming proxy started: $baseUrl');
     } catch (e) {

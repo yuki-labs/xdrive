@@ -3,17 +3,20 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'relay_connection.dart';
+import '../crypto/encryption_service.dart';
 
-/// Fetches file chunks via relay with proper header parsing
+/// Fetches file chunks via relay with encryption support
 class ChunkedRelayFetcher {
   final RelayConnection relayConnection;
   final String filePath;
+  final Uint8List? encryptionKey;
   
   static const int chunkSize = 512 * 1024; // 512KB
   
   ChunkedRelayFetcher({
     required this.relayConnection,
     required this.filePath,
+    this.encryptionKey,
   });
   
   /// Get file metadata (size, mimeType) via /file-info endpoint
@@ -26,7 +29,17 @@ class ChunkedRelayFetcher {
       
       final responseData = await relayConnection.sendRequest(requestData);
       final responseBytes = base64.decode(responseData);
-      final responseText = utf8.decode(responseBytes);
+      String responseText = utf8.decode(responseBytes);
+      
+      // Decrypt if encryption key is available
+      if (encryptionKey != null) {
+        final decrypted = EncryptionService.decryptString(responseText, encryptionKey!);
+        if (decrypted == null) {
+          debugPrint('Failed to decrypt file info response');
+          return null;
+        }
+        responseText = decrypted;
+      }
       
       // Parse JSON response
       final fileInfo = jsonDecode(responseText) as Map<String, dynamic>;
