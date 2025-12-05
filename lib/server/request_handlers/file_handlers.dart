@@ -5,6 +5,7 @@ import 'package:shelf/shelf.dart';
 import '../../models/file_item.dart';
 import '../utils/encryption_helper.dart';
 import '../utils/thumbnail_generator.dart';
+import '../utils/codec_detector.dart';
 import 'package:mime/mime.dart';
 
 /// Handles file-related HTTP requests
@@ -58,40 +59,11 @@ class FileHandlers {
     }
   }
 
-  /// Handle GET /file-info request - returns file metadata as JSON
-  Future<Response> handleGetFileInfo(Request request) async {
-    final queryParams = request.url.queryParameters;
-    final path = queryParams['path'];
-
-    if (path == null) {
-      return Response.badRequest(body: 'Missing path parameter');
-    }
-
-    final file = File(path);
-    if (!await file.exists()) {
-      return Response.notFound('File not found');
-    }
-
-    try {
-      final fileLength = await file.length();
-      final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
-      
-      final jsonBody = jsonEncode({
-        'size': fileLength,
-        'mimeType': mimeType,
-        'path': path,
-      });
-      
-      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
-    } catch (e) {
-      return Response.internalServerError(body: 'Error getting file info: $e');
-    }
-  }
-
-  /// Handle GET /stream request with range support for chunked streaming
+  /// Handle GET /stream request with optional transcoding
   Future<Response> handleStreamFile(Request request) async {
     final queryParams = request.url.queryParameters;
     final path = queryParams['path'];
+    final transcode = queryParams['transcode'] == 'true';
 
     if (path == null) {
       return Response.badRequest(body: 'Missing path parameter');
@@ -100,6 +72,11 @@ class FileHandlers {
     final file = File(path);
     if (!await file.exists()) {
       return Response.notFound('File not found');
+    }
+
+    // Check if transcoding is requested
+    if (transcode && await CodecDetector.isFFmpegAvailable()) {
+      return _streamTranscodedFile(request, file);
     }
 
     final fileLength = await file.length();
@@ -125,7 +102,7 @@ class FileHandlers {
         
         final length = end - start + 1;
         
-        // Return partial content
+        // Return partial content (stream the chunk)
         return Response(206,
           body: file.openRead(start, end + 1),
           headers: {
@@ -138,7 +115,7 @@ class FileHandlers {
       }
     }
     
-    // No range request, return full file
+    // No range request, return full file stream
     return Response.ok(
       file.openRead(),
       headers: {
@@ -147,6 +124,64 @@ class FileHandlers {
         'accept-ranges': 'bytes',
       },
     );
+  }
+
+  /// Stream transcoded video (H.264/AAC in MP4)
+  Future<Response> _streamTranscodedFile(Request request, File file) async {
+    try {
+      final args = CodecDetector.getTranscodeArgs(file.path);
+      
+      final process = await Process.start('ffmpeg', args);
+      
+      // Stream transcoded output
+      return Response.ok(
+        process.stdout,
+        headers: {
+          'content-type': 'video/mp4',
+          'accept-ranges': 'none', // Transcoding doesn't support range requests
+          'cache-control': 'no-cache',
+        },
+      );
+    } catch (e) {
+      print('Transcoding error: $e');
+      return Response.internalServerError(body: 'Transcoding failed');
+    }
+  }
+
+  /// Handle GET /file-info request - returns file metadata with codec info
+  Future<Response> handleGetFileInfo(Request request) async {
+    final queryParams = request.url.queryParameters;
+    final path = queryParams['path'];
+
+    if (path == null) {
+      return Response.badRequest(body: 'Missing path parameter');
+    }
+
+    final file = File(path);
+    if (!await file.exists()) {
+      return Response.notFound('File not found');
+    }
+
+    try {
+      final size = await file.length();
+      final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
+      
+      // Check if file needs transcoding
+      bool needsTranscoding = false;
+      if (mimeType.startsWith('video/')) {
+        needsTranscoding = await CodecDetector.needsTranscoding(path);
+      }
+
+      final jsonBody = jsonEncode({
+        'size': size,
+        'mimeType': mimeType,
+        'needsTranscoding': needsTranscoding,
+      });
+      
+      return EncryptionHelper.encryptResponse(jsonBody, encryptionKey);
+    } catch (e) {
+      return Response.internalServerError(body: 'Error getting file info: $e');
+    }
   }
 
   /// Handle GET /thumbnail request

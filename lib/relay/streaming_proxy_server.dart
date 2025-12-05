@@ -15,6 +15,7 @@ class StreamingProxyServer {
   // Cache file metadata
   int? _cachedFileSize;
   String? _cachedFilePath;
+  String? _cachedMimeType;
   
   StreamingProxyServer({
     required this.relayConnection,
@@ -43,14 +44,15 @@ class StreamingProxyServer {
     try {
       final path = request.uri.queryParameters['path'];
       
+      debugPrint('📥 Proxy request: ${request.method} ${request.uri}');
+      debugPrint('   Range: ${request.headers.value('range')}');
+      
       if (path == null) {
         request.response.statusCode = HttpStatus.badRequest;
         request.response.write('Missing path parameter');
         await request.response.close();
         return;
       }
-      
-      debugPrint('Streaming request for: $path');
       
       // Create chunked fetcher with encryption key
       final fetcher = ChunkedRelayFetcher(
@@ -59,54 +61,55 @@ class StreamingProxyServer {
         encryptionKey: encryptionKey,
       );
       
+      // Get file metadata first
+      await _getFileMetadata(fetcher, path);
+      
       // Handle range requests
       final rangeHeader = request.headers.value('range');
       
       if (rangeHeader != null) {
-        await _handleRangeRequest(request, fetcher, path, rangeHeader);
+        await _handleRangeRequest(request, fetcher, rangeHeader);
       } else {
-        await _handleFullRequest(request, fetcher, path);
+        await _handleFullRequest(request, fetcher);
       }
     } catch (e) {
-      debugPrint('Error handling streaming request: $e');
+      debugPrint('❌ Error handling streaming request: $e');
       request.response.statusCode = HttpStatus.internalServerError;
       await request.response.close();
     }
   }
   
-  /// Get file size using /file-info endpoint
-  Future<int?> _getFileSize(ChunkedRelayFetcher fetcher, String path) async {
-    // Return cached if same file
+  /// Get and cache file metadata
+  Future<void> _getFileMetadata(ChunkedRelayFetcher fetcher, String path) async {
+    // Return if already cached
     if (_cachedFilePath == path && _cachedFileSize != null) {
-      return _cachedFileSize;
+      return;
     }
     
     try {
       final fileInfo = await fetcher.getFileInfo();
       
-      if (fileInfo != null && fileInfo['size'] != null) {
-        _cachedFileSize = fileInfo['size'] as int;
+      if (fileInfo != null) {
+        _cachedFileSize = fileInfo['size'] as int?;
+        _cachedMimeType = fileInfo['mimeType'] as String?;
         _cachedFilePath = path;
-        debugPrint('File size from /file-info: $_cachedFileSize bytes');
-        return _cachedFileSize;
+        debugPrint('📊 File metadata: size=$_cachedFileSize, mime=$_cachedMimeType');
       }
     } catch (e) {
-      debugPrint('Error getting file size: $e');
+      debugPrint('⚠️ Error getting file metadata: $e');
     }
-    
-    return null;
   }
   
   Future<void> _handleRangeRequest(
     HttpRequest request,
     ChunkedRelayFetcher fetcher,
-    String path,
     String rangeHeader,
   ) async {
     // Parse range: "bytes=0-1000"
     final match = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(rangeHeader);
     
     if (match == null) {
+      debugPrint('❌ Invalid range header: $rangeHeader');
       request.response.statusCode = HttpStatus.badRequest;
       await request.response.close();
       return;
@@ -115,14 +118,25 @@ class StreamingProxyServer {
     final start = int.parse(match.group(1)!);
     final endStr = match.group(2);
     
-    // Fetch the requested chunk
-    final end = endStr != null && endStr.isNotEmpty
-        ? int.parse(endStr)
-        : start + ChunkedRelayFetcher.chunkSize - 1;
+    // Calculate end position - MUST NOT exceed file size!
+    int end;
+    if (endStr != null && endStr.isNotEmpty) {
+      end = int.parse(endStr);
+    } else {
+      // Open-ended range (bytes=X-): return one chunk or to EOF, whichever is smaller
+      final requestedEnd = start + ChunkedRelayFetcher.chunkSize - 1;
+      end = _cachedFileSize != null 
+          ? requestedEnd.clamp(start, _cachedFileSize! - 1)
+          : requestedEnd;
+    }
     
+    debugPrint('📍 Range request: bytes $start-$end');
+    
+    // Fetch the chunk
     final result = await fetcher.fetchChunkWithHeaders(start, end);
     
     if (result == null || result['data'] == null) {
+      debugPrint('❌ Failed to fetch chunk');
       request.response.statusCode = HttpStatus.notFound;
       await request.response.close();
       return;
@@ -131,23 +145,29 @@ class StreamingProxyServer {
     final chunk = result['data'] as Uint8List;
     final actualEnd = start + chunk.length - 1;
     
-    // Get file size for proper Content-Range
-    final fileSize = await _getFileSize(fetcher, path);
-    
-    // Send partial content
-    request.response.statusCode = HttpStatus.partialContent;
-    request.response.headers.set('content-type', _getMimeType(path));
-    request.response.headers.set('content-length', chunk.length.toString());
-    
-    // Use actual file size if available
-    if (fileSize != null) {
-      request.response.headers.set('content-range', 'bytes $start-$actualEnd/$fileSize');
-      debugPrint('Content-Range: bytes $start-$actualEnd/$fileSize');
-    } else {
-      request.response.headers.set('content-range', 'bytes $start-$actualEnd/*');
+    // CRITICAL: Must have file size for ExoPlayer
+    if (_cachedFileSize == null) {
+      debugPrint('⚠️ WARNING: No file size available!');
+      // Fallback: return 200 OK without range
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.set('content-type', _cachedMimeType ?? 'video/mp4');
+      request.response.headers.set('content-length', chunk.length.toString());
+      request.response.headers.set('accept-ranges', 'bytes');
+      request.response.add(chunk);
+      await request.response.close();
+      return;
     }
     
+    // Send proper 206 Partial Content
+    request.response.statusCode = 206;
+    request.response.headers.set('content-type', _cachedMimeType ?? 'video/mp4');
+    request.response.headers.set('content-length', chunk.length.toString());
+    request.response.headers.set('content-range', 'bytes $start-$actualEnd/$_cachedFileSize');
     request.response.headers.set('accept-ranges', 'bytes');
+    request.response.headers.set('access-control-allow-origin', '*');
+    
+    debugPrint('📤 206 Partial Content: bytes $start-$actualEnd/$_cachedFileSize (${chunk.length} bytes)');
+    
     request.response.add(chunk);
     await request.response.close();
   }
@@ -155,44 +175,33 @@ class StreamingProxyServer {
   Future<void> _handleFullRequest(
     HttpRequest request,
     ChunkedRelayFetcher fetcher,
-    String path,
   ) async {
-    // Stream file progressively
-    request.response.statusCode = HttpStatus.ok;
-    request.response.headers.set('content-type', _getMimeType(path));
-    request.response.headers.set('accept-ranges', 'bytes');
+    debugPrint('📍 Full file request');
     
-    await fetcher.fetchProgressive(
-      onChunk: (chunk, offset) {
-        request.response.add(chunk);
-      },
-      onComplete: () async {
-        await request.response.close();
-      },
-      onError: (error) async {
-        debugPrint('Streaming error: $error');
-        await request.response.close();
-      },
-    );
-  }
-  
-  String _getMimeType(String path) {
-    final ext = path.split('.').last.toLowerCase();
-    switch (ext) {
-      case 'mp4': return 'video/mp4';
-      case 'mkv': return 'video/x-matroska';
-      case 'webm': return 'video/webm';
-      case 'mov': return 'video/quicktime';
-      case 'avi': return 'video/x-msvideo';
-      case 'mp3': return 'audio/mpeg';
-      case 'flac': return 'audio/flac';
-      case 'ogg': return 'audio/ogg';
-      case 'jpg':
-      case 'jpeg': return 'image/jpeg';
-      case 'png': return 'image/png';
-      case 'gif': return 'image/gif';
-      default: return 'application/octet-stream';
+    // For full requests, return first chunk and let player request more
+    final result = await fetcher.fetchChunkWithHeaders(0, ChunkedRelayFetcher.chunkSize - 1);
+    
+    if (result == null || result['data'] == null) {
+      debugPrint('❌ Failed to fetch first chunk');
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+      return;
     }
+    
+    final chunk = result['data'] as Uint8List;
+    
+    // Send 206 even for "full" request to indicate partial content support
+    request.response.statusCode = 206;
+    request.response.headers.set('content-type', _cachedMimeType ?? 'video/mp4');
+    request.response.headers.set('content-length', chunk.length.toString());
+    request.response.headers.set('content-range', 'bytes 0-${chunk.length - 1}/$_cachedFileSize');
+    request.response.headers.set('accept-ranges', 'bytes');
+    request.response.headers.set('access-control-allow-origin', '*');
+    
+    debugPrint('📤 206 Partial Content: bytes 0-${chunk.length - 1}/$_cachedFileSize');
+    
+    request.response.add(chunk);
+    await request.response.close();
   }
   
   String? getProxyUrl(String filePath) {
@@ -206,6 +215,7 @@ class StreamingProxyServer {
     _port = null;
     _cachedFileSize = null;
     _cachedFilePath = null;
+    _cachedMimeType = null;
     debugPrint('Streaming proxy server stopped');
   }
 }

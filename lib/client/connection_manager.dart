@@ -1,7 +1,8 @@
+import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:nsd/nsd.dart' as nsd;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:typed_data';
 import '../crypto/encryption_service.dart';
 import '../relay/relay_connection.dart';
 
@@ -32,6 +33,16 @@ class ConnectionManager with ChangeNotifier {
   
   bool _usingRelay = false;
   bool get usingRelay => _usingRelay;
+  
+  // Username-based connection info
+  String? _relayUsername;
+  String? get relayUsername => _relayUsername;
+  
+  List<String> _availableHosts = [];
+  List<String> get availableHosts => _availableHosts;
+  
+  String? _selectedHost;
+  String? get selectedHost => _selectedHost;
 
   Future<void> startDiscovery() async {
     _discovery = await nsd.startDiscovery('_http._tcp');
@@ -39,40 +50,28 @@ class ConnectionManager with ChangeNotifier {
       if (status == nsd.ServiceStatus.found) {
         debugPrint('Service discovered: name="${service.name}", host=${service.host}, port=${service.port}');
         
-        // Check if this service is already in the list (by host:port)
         final existingIndex = _discoveredServices.indexWhere((s) =>
             s.host == service.host && s.port == service.port);
         
         if (existingIndex == -1) {
-          // New service, add it
           _discoveredServices.add(service);
           notifyListeners();
         } else {
-          // Service exists, check if new name is better
           final existing = _discoveredServices[existingIndex];
           final existingName = existing.name ?? '';
           final newName = service.name ?? '';
           
-          // Prefer names that don't have (1), (2) etc. - these are duplicates
           final existingHasNumber = existingName.contains(RegExp(r'\(\d+\)'));
           final newHasNumber = newName.contains(RegExp(r'\(\d+\)'));
           
           if (!newHasNumber && existingHasNumber) {
-            // Upgrade: New name is better (actual hostname), replace it
             debugPrint('Updating service name from "$existingName" to "$newName"');
             _discoveredServices[existingIndex] = service;
             notifyListeners();
-          } else if (newHasNumber && !existingHasNumber) {
-            // Protect: Don't downgrade from actual hostname to numbered variant
-            debugPrint('Keeping actual hostname "$existingName", ignoring numbered variant "${service.name}"');
-          } else {
-            // Both numbered or both non-numbered, keep existing
-            debugPrint('Duplicate service ignored: ${service.name} (${service.host}:${service.port})');
           }
         }
       } else {
         debugPrint('Service lost: name="${service.name}", host=${service.host}');
-        // Remove by host:port combination instead of just name
         _discoveredServices.removeWhere((s) =>
             s.host == service.host && s.port == service.port);
         notifyListeners();
@@ -92,30 +91,30 @@ class ConnectionManager with ChangeNotifier {
     _relayConnection?.disconnect();
     _relayConnection = null;
     _usingRelay = false;
+    _relayUsername = null;
+    _availableHosts = [];
+    _selectedHost = null;
     notifyListeners();
   }
   
-  /// Connect via relay server for internet access
+  /// Connect via relay using room ID (legacy)
   Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
     try {
       debugPrint('Connecting via relay to room: $roomId');
       
-      // Derive encryption key
       final salt = EncryptionService.deriveSaltFromPassphrase(passphrase);
       _encryptionKey = EncryptionService.deriveKey(passphrase, salt);
       debugPrint('Encryption key derived for relay connection');
       
-      // Connect to relay
-      _relayConnection = RelayConnection(relayUrl: relayUrl);
+      _relayConnection = RelayConnection(relayUrl);
       await _relayConnection!.joinRoom(roomId);
       
       _usingRelay = true;
       
-      // Create a fake service for compatibility (but won't be used for HTTP)
       _connectedService = nsd.Service(
         name: 'Internet Connection',
         type: '_http._tcp',
-        host: 'relay',  // Not used for actual connection
+        host: 'relay',
         port: 0,
       );
       
@@ -130,14 +129,86 @@ class ConnectionManager with ChangeNotifier {
     }
   }
   
-  // Get saved passphrase for a server
+  /// Connect via relay using username (new method)
+  /// Returns list of available hosts if multiple, or auto-connects if only one
+  Future<List<String>> connectViaUsername(String username, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
+    try {
+      debugPrint('Connecting via relay to username: $username');
+      
+      final salt = EncryptionService.deriveSaltFromPassphrase(passphrase);
+      _encryptionKey = EncryptionService.deriveKey(passphrase, salt);
+      debugPrint('Encryption key derived for relay connection');
+      
+      _relayConnection = RelayConnection(relayUrl);
+      _relayUsername = username;
+      
+      // Set up callbacks before joining
+      final hostCompleter = Completer<List<String>>();
+      
+      _relayConnection!.onHostsAvailable = (hosts) {
+        _availableHosts = hosts;
+        notifyListeners();
+        if (!hostCompleter.isCompleted) {
+          hostCompleter.complete(hosts);
+        }
+      };
+      
+      _relayConnection!.onHostSelected = (deviceName) {
+        _selectedHost = deviceName;
+        _usingRelay = true;
+        
+        _connectedService = nsd.Service(
+          name: 'Internet: $deviceName',
+          type: '_http._tcp',
+          host: 'relay',
+          port: 0,
+        );
+        
+        debugPrint('Connected to host: $deviceName');
+        notifyListeners();
+      };
+      
+      _relayConnection!.onError = (error) {
+        debugPrint('Relay error: $error');
+        if (!hostCompleter.isCompleted) {
+          hostCompleter.completeError(Exception(error));
+        }
+      };
+      
+      await _relayConnection!.joinByUsername(username);
+      
+      // Wait for hosts list (with timeout)
+      final hosts = await hostCompleter.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('Timeout waiting for hosts'),
+      );
+      
+      return hosts;
+      
+    } catch (e) {
+      debugPrint('Failed to connect via username: $e');
+      _relayConnection = null;
+      _usingRelay = false;
+      _relayUsername = null;
+      rethrow;
+    }
+  }
+  
+  /// Select a specific host device to connect to
+  Future<void> selectHost(String deviceName) async {
+    if (_relayConnection == null) {
+      throw Exception('Not connected to relay');
+    }
+    
+    await _relayConnection!.selectHost(deviceName);
+  }
+  
   Future<String?> getSavedPassphrase(nsd.Service service) async {
     final prefs = await SharedPreferences.getInstance();
     final key = 'passphrase_${service.host}_${service.port}';
     return prefs.getString(key);
   }
   
-  // Save passphrase for a server
   Future<void> savePassphrase(nsd.Service service, String passphrase) async {
     final prefs = await SharedPreferences.getInstance();
     final key = 'passphrase_${service.host}_${service.port}';
@@ -150,22 +221,13 @@ class ConnectionManager with ChangeNotifier {
     
     debugPrint('connectToService called with passphrase: ${passphrase != null ? "provided (${passphrase.length} chars)" : "null"}');
     
-    // Derive encryption key immediately if passphrase is provided
     if (passphrase != null) {
       debugPrint('Deriving salt from passphrase...');
-      debugPrint('Passphrase for salt derivation: $passphrase');
-      // Derive salt from passphrase (same algorithm as server)
       final salt = EncryptionService.deriveSaltFromPassphrase(passphrase);
-      debugPrint('Salt derived: ${salt.length} bytes, hex: ${salt.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}');
-      
       debugPrint('Deriving encryption key...');
       _encryptionKey = EncryptionService.deriveKey(passphrase, salt);
       debugPrint('Encryption key derived: ${_encryptionKey != null ? "${_encryptionKey!.length} bytes" : "null"}');
-      if (_encryptionKey != null) {
-        debugPrint('Key hex (first 16 bytes): ${_encryptionKey!.sublist(0, 16).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}');
-      }
       
-      // Save passphrase for future connections
       savePassphrase(service, passphrase);
     } else {
       debugPrint('No passphrase provided - encryption disabled');

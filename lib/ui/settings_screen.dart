@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../server/file_server.dart';
 import '../client/local_file_provider.dart';
+import '../relay/relay_client.dart';
+import 'dialogs/username_setup_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -27,6 +29,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return 'Not found';
     } catch (e) {
       return 'Error: $e';
+    }
+  }
+  
+  Future<void> _showUsernameSetupDialog(BuildContext context, FileServer fileServer) async {
+    final defaultDeviceName = RelayClient.getDeviceName();
+    
+    final result = await showDialog<UsernameSetupResult>(
+      context: context,
+      builder: (context) => UsernameSetupDialog(defaultDeviceName: defaultDeviceName),
+    );
+    
+    if (result != null && mounted) {
+      try {
+        await fileServer.enableRelayModeWithUsername(
+          username: result.username,
+          customDeviceName: result.customDeviceName,
+        );
+        
+        if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Internet access enabled! Username: ${result.username}'),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to enable: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -206,58 +245,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      SwitchListTile(
-                        title: const Text('Enable Internet Access'),
-                        subtitle: Text(
-                          fileServer.relayMode
-                              ? 'Guests can connect from anywhere'
-                              : 'Only local network access',
+                      if (!fileServer.relayMode) ...[
+                        // Not enabled - show setup button
+                        Center(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _showUsernameSetupDialog(context, fileServer),
+                            icon: const Icon(Icons.public),
+                            label: const Text('Enable Internet Access'),
+                          ),
                         ),
-                        value: fileServer.relayMode,
-                        onChanged: (value) async {
-                          if (value) {
-                            // Enable relay
-                            try {
-                              final roomId = await fileServer.enableRelayMode();
-                              if (mounted) {
-                                setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Internet access enabled! Room ID: $roomId'),
-                                    duration: const Duration(seconds: 4),
-                                  ),
-                                );
-                              }
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Failed to enable: $e'),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
-                              }
-                            }
-                          } else {
-                            // Disable relay
-                            await fileServer.disableRelayMode();
-                            if (mounted) {
-                              setState(() {});
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Internet access disabled')),
-                              );
-                            }
-                          }
-                        },
-                      ),
-                      if (fileServer.relayRoomId != null) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Allow clients to connect from anywhere using your username',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                          textAlign: TextAlign.center,
+                        ),
+                      ] else ...[
+                        // Enabled - show info
+                        _buildInfoRow(
+                          context,
+                          'Status',
+                          'Connected',
+                          Icons.check_circle,
+                          Colors.green,
+                        ),
                         const Divider(),
+                        if (fileServer.relayUsername != null) ...[
+                          _buildInfoRow(
+                            context,
+                            'Username',
+                            fileServer.relayUsername!,
+                            Icons.person,
+                            Colors.blue,
+                            onTap: () {
+                              Clipboard.setData(ClipboardData(text: fileServer.relayUsername!));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Username copied to clipboard'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                          ),
+                          const Divider(),
+                        ],
+                        if (fileServer.relayDeviceName != null) ...[
+                          _buildInfoRow(
+                            context,
+                            'Device',
+                            fileServer.relayDeviceName!,
+                            Icons.computer,
+                            null,
+                          ),
+                          const Divider(),
+                        ],
                         _buildInfoRow(
                           context,
                           'Room ID',
                           fileServer.relayRoomId!,
                           Icons.meeting_room,
-                          Colors.green,
+                          Colors.orange,
                           onTap: () {
                             Clipboard.setData(ClipboardData(text: fileServer.relayRoomId!));
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -268,10 +315,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             );
                           },
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 16),
                         const Text(
-                          'Share this Room ID and Passphrase with guests to allow them to connect over the internet.',
+                          'Share your username with guests so they can connect from anywhere.',
                           style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 16),
+                        Center(
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              await fileServer.disableRelayMode();
+                              if (mounted) {
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Internet access disabled')),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.public_off),
+                            label: const Text('Disable'),
+                          ),
                         ),
                       ],
                     ],

@@ -32,6 +32,8 @@ class FileServer {
   
   bool get relayMode => _relayModeManager.relayMode;
   String? get relayRoomId => _relayModeManager.relayRoomId;
+  String? get relayUsername => _relayModeManager.relayUsername;
+  String? get relayDeviceName => _relayModeManager.relayDeviceName;
   String? get passphrase => _encryptionManager.passphrase;
   
   FileServer({this.port = 8080}) {
@@ -112,11 +114,25 @@ class FileServer {
     await _relayModeManager.disableRelayMode();
   }
   
-  /// Enable relay mode for internet access
+  /// Enable relay mode with random room ID (legacy)
   Future<String> enableRelayMode({String relayUrl = 'ws://127.0.0.1:8081'}) async {
     return await _relayModeManager.enableRelayMode(
       relayUrl: relayUrl,
       requestHandler: _relayRequestHandler,
+    );
+  }
+  
+  /// Enable relay mode with username (new method)
+  Future<String> enableRelayModeWithUsername({
+    String relayUrl = 'ws://127.0.0.1:8081',
+    required String username,
+    String? customDeviceName,
+  }) async {
+    return await _relayModeManager.enableRelayModeWithUsername(
+      relayUrl: relayUrl,
+      username: username,
+      requestHandler: _relayRequestHandler,
+      customDeviceName: customDeviceName,
     );
   }
   

@@ -2,11 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'client/remote_file_provider.dart';
 import 'client/local_file_provider.dart';
+import 'client/account_service.dart';
 import 'server/file_server.dart';
 import 'server/discovery_service.dart';
 import 'ui/home_screen.dart';
@@ -19,9 +19,6 @@ void main() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
-  
-  // Initialize media_kit for video playback
-  MediaKit.ensureInitialized();
 
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
@@ -58,6 +55,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => RemoteFileProvider()),
         ChangeNotifierProvider(create: (_) => LocalFileProvider()),
+        ChangeNotifierProvider(create: (_) => AccountService()),
         Provider(create: (_) => FileServer()),
         Provider(create: (_) => DiscoveryService()),
       ],

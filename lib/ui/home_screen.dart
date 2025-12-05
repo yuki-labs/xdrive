@@ -7,11 +7,13 @@ import '../server/file_server.dart';
 import '../server/discovery_service.dart';
 import '../client/remote_file_provider.dart';
 import '../client/local_file_provider.dart';
+import '../client/account_service.dart';
 import 'browser_view.dart';
 import 'local_browser_view.dart';
 import 'settings_screen.dart';
 import 'dialogs/passphrase_dialog.dart';
-import 'dialogs/room_id_dialog.dart';
+import 'dialogs/connection_dialog.dart';
+import 'dialogs/host_picker_dialog.dart';
 import '../models/desktop_mode.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -36,10 +38,13 @@ class _HomeScreenState extends State<HomeScreen> {
         await _startServer();
       });
     } else {
-      // Mobile: Start discovery and set up global decryption failure handler
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Mobile: Start discovery, initialize account, and set up global decryption failure handler
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         final provider = context.read<RemoteFileProvider>();
+        final accountService = context.read<AccountService>();
+        
         provider.startDiscovery();
+        await accountService.initialize(); // Load saved account and check for hosts
         
         // Set up global decryption failure callback
         provider.onDecryptionFailed = () async {
@@ -516,6 +521,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildInternetTab(RemoteFileProvider provider) {
+    final accountService = context.watch<AccountService>();
+    
+    // If account is saved, show hosts view
+    if (accountService.hasAccount) {
+      return _buildAccountView(provider, accountService);
+    }
+    
+    // No account - show setup prompt
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -530,50 +543,147 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Get the Room ID and Passphrase from the desktop host (Settings → Internet Access)',
+              'Get the username and passphrase from the desktop host (Settings → Internet Access)',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 32),
             FilledButton.icon(
-              onPressed: () async {
-                // Get room ID
-                final roomId = await showDialog<String>(
-                  context: context,
-                  builder: (context) => const RoomIdDialog(),
-                );
-                
-                if (roomId == null || !context.mounted) return;
-                
-                // Get passphrase
-                final passphrase = await showDialog<String>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (context) => const PassphraseDialog(),
-                );
-                
-                if (passphrase == null || !context.mounted) return;
-                
-                // Connect via relay
-                try {
-                  await provider.connectViaRelay(roomId, passphrase);
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Connection failed: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
+              onPressed: () => _showConnectionFlow(context, provider),
               icon: const Icon(Icons.login),
-              label: const Text('Enter Room ID'),
+              label: const Text('Set Up Account'),
             ),
           ],
         ),
       ),
     );
+  }
+  
+  Widget _buildAccountView(RemoteFileProvider provider, AccountService accountService) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            child: ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.person)),
+              title: Text(accountService.savedUsername ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Saved Account'),
+              trailing: PopupMenuButton(
+                icon: const Icon(Icons.more_vert),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'refresh', child: ListTile(leading: Icon(Icons.refresh), title: Text('Refresh'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'logout', child: ListTile(leading: Icon(Icons.logout), title: Text('Sign Out'), contentPadding: EdgeInsets.zero)),
+                ],
+                onSelected: (value) async {
+                  if (value == 'refresh') await accountService.checkForHosts();
+                  else if (value == 'logout') await accountService.clearAccount();
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Text('Available Hosts', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(width: 8),
+              if (accountService.isChecking) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: accountService.availableHosts.isEmpty
+                ? _buildNoHostsView(accountService)
+                : _buildHostsList(provider, accountService),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildNoHostsView(AccountService accountService) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.cloud_off, size: 64, color: Colors.grey.shade600),
+          const SizedBox(height: 16),
+          const Text('No hosts online', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('Make sure the desktop app is running and\nInternet Access is enabled', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade500)),
+          const SizedBox(height: 24),
+          OutlinedButton.icon(
+            onPressed: accountService.isChecking ? null : () => accountService.checkForHosts(),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildHostsList(RemoteFileProvider provider, AccountService accountService) {
+    return ListView.builder(
+      itemCount: accountService.availableHosts.length,
+      itemBuilder: (context, index) {
+        final host = accountService.availableHosts[index];
+        return Card(
+          child: ListTile(
+            leading: const Icon(Icons.computer, size: 36),
+            title: Text(host),
+            subtitle: const Text('Online'),
+            trailing: FilledButton(onPressed: () => _connectToHost(provider, accountService, host), child: const Text('Connect')),
+            onTap: () => _connectToHost(provider, accountService, host),
+          ),
+        );
+      },
+    );
+  }
+  
+  Future<void> _connectToHost(RemoteFileProvider provider, AccountService accountService, String hostDevice) async {
+    try {
+      final username = accountService.savedUsername!;
+      final passphrase = accountService.savedPassphrase!;
+      await provider.connectViaUsername(username, passphrase);
+      if (accountService.availableHosts.length > 1) {
+        await provider.selectHost(hostDevice);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+  
+  Future<void> _showConnectionFlow(BuildContext context, RemoteFileProvider provider) async {
+    final accountService = context.read<AccountService>();
+    
+    final connectionResult = await showDialog<ConnectionResult>(context: context, builder: (context) => const ConnectionDialog());
+    if (connectionResult == null || !context.mounted) return;
+    
+    final passphrase = await showDialog<String>(context: context, barrierDismissible: false, builder: (context) => const PassphraseDialog());
+    if (passphrase == null || !context.mounted) return;
+    
+    try {
+      if (connectionResult.isUsername) {
+        final hosts = await provider.connectViaUsername(connectionResult.identifier, passphrase);
+        if (!context.mounted) return;
+        
+        await accountService.saveAccount(connectionResult.identifier, passphrase);
+        
+        if (hosts.length > 1) {
+          final selectedHost = await showDialog<String>(context: context, builder: (context) => HostPickerDialog(hosts: hosts, username: connectionResult.identifier));
+          if (selectedHost == null || !context.mounted) return;
+          await provider.selectHost(selectedHost);
+        }
+      } else {
+        await provider.connectViaRelay(connectionResult.identifier, passphrase);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connection failed: $e'), backgroundColor: Colors.red));
+      }
+    }
   }
 }

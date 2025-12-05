@@ -1,8 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
-import 'custom_video_controls.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
 
 class VideoPlayerView extends StatefulWidget {
   final String url;
@@ -19,34 +18,85 @@ class VideoPlayerView extends StatefulWidget {
 }
 
 class _VideoPlayerViewState extends State<VideoPlayerView> {
-  late final Player player;
-  late final VideoController controller;
+  late VideoPlayerController _videoPlayerController;
+  ChewieController? _chewieController;
+  bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
-    player = Player();
-    controller = VideoController(player);
-    
-    // Open the video
-    if (widget.url.startsWith('file://')) {
-      // Local file
-      final filePath = Uri.parse(widget.url).toFilePath();
-      player.open(Media(filePath));
-    } else {
-      // Remote URL
-      player.open(Media(widget.url));
+    _initializePlayer();
+  }
+
+  Future<void> _initializePlayer() async {
+    // Create video player controller with optimized settings
+    _videoPlayerController = VideoPlayerController.networkUrl(
+      Uri.parse(widget.url),
+      videoPlayerOptions: VideoPlayerOptions(
+        // Allow mixed content (important for localhost proxy)
+        mixWithOthers: true,
+        // Set HTTP headers if needed
+        allowBackgroundPlayback: false,
+      ),
+    );
+
+    try {
+      await _videoPlayerController.initialize();
+      
+      // Create chewie controller with minimal buffering for fast seeking
+      _chewieController = ChewieController(
+        videoPlayerController: _videoPlayerController,
+        aspectRatio: _videoPlayerController.value.aspectRatio,
+        autoPlay: true,
+        looping: false,
+        // Return to portrait after exiting fullscreen
+        deviceOrientationsAfterFullScreen: [
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ],
+        // Styled progress bar
+        materialProgressColors: ChewieProgressColors(
+          playedColor: const Color(0xFF2196F3),
+          handleColor: Colors.white,
+          bufferedColor: Colors.white24,
+          backgroundColor: Colors.white12,
+        ),
+        placeholder: Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(
+              color: Color(0xFF2196F3),
+            ),
+          ),
+        ),
+        autoInitialize: true,
+        // Show controls immediately
+        showControlsOnInitialize: true,
+        // Hide controls after 3 seconds
+        hideControlsTimer: const Duration(seconds: 3),
+      );
+
+      setState(() {
+        _isInitialized = true;
+      });
+    } catch (e) {
+      debugPrint('Error initializing video: $e');
     }
   }
 
   @override
   void dispose() {
-    player.dispose();
+    _videoPlayerController.pause();
+    _videoPlayerController.dispose();
+    _chewieController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final orientation = MediaQuery.of(context).orientation;
+    final isLandscape = orientation == Orientation.landscape;
+    
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.fileName),
@@ -54,34 +104,22 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         foregroundColor: Colors.white,
       ),
       backgroundColor: Colors.black,
-      body: Padding(
-        padding: const EdgeInsets.only(bottom: 80.0),
-        child: Center(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              // Calculate video width based on available space
-              final videoWidth = constraints.maxWidth;
-              final videoHeight = videoWidth * 9 / 16; // 16:9 aspect ratio
-              
-              return SizedBox(
-                width: videoWidth,
-                height: videoHeight.clamp(0, constraints.maxHeight),
-                child: Platform.isAndroid || Platform.isIOS
-                    ? Video(
-                        controller: controller,
-                        controls: (state) => CustomMobileVideoControls(
-                          state: state,
-                          fileName: widget.fileName,
-                        ),
-                      )
-                    : Video(
-                        controller: controller,
-                        controls: MaterialVideoControls,
-                      ),
-              );
-            },
-          ),
-        ),
+      body: Center(
+        child: _isInitialized && _chewieController != null
+            ? Padding(
+                // Add padding in landscape mode for centered UI
+                padding: EdgeInsets.symmetric(
+                  horizontal: isLandscape ? 24.0 : 0.0,  // Side padding
+                  vertical: isLandscape ? 24.0 : 0.0,     // Top/bottom padding
+                ),
+                child: AspectRatio(
+                  aspectRatio: _videoPlayerController.value.aspectRatio,
+                  child: Chewie(controller: _chewieController!),
+                ),
+              )
+            : const CircularProgressIndicator(
+                color: Color(0xFF2196F3),
+              ),
       ),
     );
   }

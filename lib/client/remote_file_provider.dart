@@ -95,6 +95,29 @@ class RemoteFileProvider with ChangeNotifier {
     notifyListeners();
   }
   
+  /// Connect via relay using username (new method)
+  Future<List<String>> connectViaUsername(String username, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
+    final hosts = await _connection.connectViaUsername(username, passphrase, relayUrl: relayUrl);
+    
+    // If only one host, auto-connected - start proxy and fetch files
+    if (hosts.length == 1) {
+      await _browser.startProxyServer();
+      await _browser.fetchFiles('/');
+      notifyListeners();
+    }
+    
+    return hosts;
+  }
+  
+  /// Select a specific host to connect to (after connectViaUsername)
+  Future<void> selectHost(String deviceName) async {
+    await _connection.selectHost(deviceName);
+    // Now connected - start proxy and fetch files
+    await _browser.startProxyServer();
+    await _browser.fetchFiles('/');
+    notifyListeners();
+  }
+  
   Future<String?> getSavedPassphrase(nsd.Service service) => _connection.getSavedPassphrase(service);
   Future<void> savePassphrase(nsd.Service service, String passphrase) => _connection.savePassphrase(service, passphrase);
   
