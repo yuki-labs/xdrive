@@ -8,7 +8,7 @@ class AccountService with ChangeNotifier {
   static const String _usernameKey = 'saved_username';
   static const String _passphraseKey = 'saved_passphrase';
   static const String _relayUrlKey = 'relay_url';
-  static const String _defaultRelayUrl = 'ws://192.168.1.3:8081';
+  static const String _defaultRelayUrl = 'wss://xdrive-production.up.railway.app';
   
   String? _savedUsername;
   String? _savedPassphrase;

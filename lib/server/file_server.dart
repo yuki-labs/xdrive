@@ -115,7 +115,7 @@ class FileServer {
   }
   
   /// Enable relay mode with random room ID (legacy)
-  Future<String> enableRelayMode({String relayUrl = 'ws://127.0.0.1:8081'}) async {
+  Future<String> enableRelayMode({String relayUrl = 'wss://xdrive-production.up.railway.app'}) async {
     return await _relayModeManager.enableRelayMode(
       relayUrl: relayUrl,
       requestHandler: _relayRequestHandler,
@@ -124,7 +124,7 @@ class FileServer {
   
   /// Enable relay mode with username (new method)
   Future<String> enableRelayModeWithUsername({
-    String relayUrl = 'ws://127.0.0.1:8081',
+    String relayUrl = 'wss://xdrive-production.up.railway.app',
     required String username,
     String? customDeviceName,
   }) async {

@@ -86,7 +86,7 @@ class RemoteFileProvider with ChangeNotifier {
     notifyListeners();
   }
   
-  Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
+  Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'wss://xdrive-production.up.railway.app'}) async {
     await _connection.connectViaRelay(roomId, passphrase, relayUrl: relayUrl);
     // Start proxy server for video streaming
     await _browser.startProxyServer();
@@ -96,7 +96,7 @@ class RemoteFileProvider with ChangeNotifier {
   }
   
   /// Connect via relay using username (new method)
-  Future<List<String>> connectViaUsername(String username, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
+  Future<List<String>> connectViaUsername(String username, String passphrase, {String relayUrl = 'wss://xdrive-production.up.railway.app'}) async {
     final hosts = await _connection.connectViaUsername(username, passphrase, relayUrl: relayUrl);
     
     // If only one host, auto-connected - start proxy and fetch files

@@ -98,7 +98,7 @@ class ConnectionManager with ChangeNotifier {
   }
   
   /// Connect via relay using room ID (legacy)
-  Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
+  Future<void> connectViaRelay(String roomId, String passphrase, {String relayUrl = 'wss://xdrive-production.up.railway.app'}) async {
     try {
       debugPrint('Connecting via relay to room: $roomId');
       
@@ -131,7 +131,7 @@ class ConnectionManager with ChangeNotifier {
   
   /// Connect via relay using username (new method)
   /// Returns list of available hosts if multiple, or auto-connects if only one
-  Future<List<String>> connectViaUsername(String username, String passphrase, {String relayUrl = 'ws://192.168.1.3:8081'}) async {
+  Future<List<String>> connectViaUsername(String username, String passphrase, {String relayUrl = 'wss://xdrive-production.up.railway.app'}) async {
     try {
       debugPrint('Connecting via relay to username: $username');
       
