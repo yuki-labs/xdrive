@@ -567,13 +567,19 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Card(
             child: ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
+              leading: CircleAvatar(
+                backgroundColor: accountService.isConnected ? Colors.green : Colors.orange,
+                child: Icon(
+                  accountService.isConnected ? Icons.cloud_done : Icons.cloud_off,
+                  color: Colors.white,
+                ),
+              ),
               title: Text(accountService.savedUsername ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('Saved Account'),
+              subtitle: Text(accountService.isConnected ? 'Connected to relay' : 'Connecting...'),
               trailing: PopupMenuButton(
                 icon: const Icon(Icons.more_vert),
                 itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'refresh', child: ListTile(leading: Icon(Icons.refresh), title: Text('Refresh'), contentPadding: EdgeInsets.zero)),
+                  const PopupMenuItem(value: 'refresh', child: ListTile(leading: Icon(Icons.refresh), title: Text('Reconnect'), contentPadding: EdgeInsets.zero)),
                   const PopupMenuItem(value: 'logout', child: ListTile(leading: Icon(Icons.logout), title: Text('Sign Out'), contentPadding: EdgeInsets.zero)),
                 ],
                 onSelected: (value) async {
@@ -588,7 +594,14 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Text('Available Hosts', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(width: 8),
-              if (accountService.isChecking) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+              if (!accountService.isConnected) 
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              else if (accountService.availableHosts.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(12)),
+                  child: Text('${accountService.availableHosts.length}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ),
             ],
           ),
           const SizedBox(height: 8),

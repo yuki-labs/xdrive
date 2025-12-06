@@ -8,7 +8,10 @@ const PORT = process.env.PORT || 8081;
 const rooms = new Map();
 
 // Track which WebSocket belongs to which room and their role
-const socketInfo = new Map(); // ws -> { roomId, role: 'host'|'client', deviceName? }
+const socketInfo = new Map(); // ws -> { roomId, role: 'host'|'client'|'watcher', deviceName? }
+
+// Track watchers: username -> Set<WebSocket> (clients watching for host updates)
+const watchers = new Map();
 
 // Create HTTP server for health checks (required by Railway/cloud platforms)
 const server = http.createServer((req, res) => {
@@ -92,6 +95,11 @@ wss.on('connection', (ws) => {
         case 'check-username':
           // Check if hosts are available for username (without joining)
           handleCheckUsername(ws, message.username);
+          break;
+
+        case 'watch-username':
+          // Subscribe to real-time host updates for a username
+          handleWatchUsername(ws, message.username);
           break;
 
         case 'select-host':
@@ -206,6 +214,9 @@ function handleRegisterUsername(ws, username, deviceName) {
     }
   }
 
+  // Notify watchers about host availability
+  notifyWatchers(username, Array.from(room.hosts.keys()));
+
   console.log(`Host "${deviceName}" registered for username "${username}" (room: ${roomId})`);
 }
 
@@ -272,6 +283,66 @@ function handleCheckUsername(ws, username) {
 
   console.log(`Check for "${username}": ${hostList.length} hosts available`);
 }
+
+// New: Subscribe to host updates for a username (persistent connection)
+function handleWatchUsername(ws, username) {
+  if (!username) {
+    ws.send(JSON.stringify({
+      type: 'error',
+      message: 'Username is required for watching'
+    }));
+    return;
+  }
+
+  const normalizedUsername = username.toLowerCase().trim();
+
+  // Add to watchers set for this username
+  if (!watchers.has(normalizedUsername)) {
+    watchers.set(normalizedUsername, new Set());
+  }
+  watchers.get(normalizedUsername).add(ws);
+
+  // Track this socket as a watcher
+  socketInfo.set(ws, { role: 'watcher', username: normalizedUsername });
+
+  // Send current hosts immediately
+  const roomId = usernameToRoomId(username);
+  const room = rooms.get(roomId);
+  const hostList = room ? Array.from(room.hosts.keys()) : [];
+
+  ws.send(JSON.stringify({
+    type: 'hosts-updated',
+    username: username,
+    hosts: hostList
+  }));
+
+  console.log(`Watcher subscribed to "${username}" (${hostList.length} hosts currently online)`);
+}
+
+// Notify watchers when hosts change for a username
+function notifyWatchers(username, hosts) {
+  const normalizedUsername = username.toLowerCase().trim();
+  const usernameWatchers = watchers.get(normalizedUsername);
+
+  if (!usernameWatchers || usernameWatchers.size === 0) {
+    return;
+  }
+
+  const message = JSON.stringify({
+    type: 'hosts-updated',
+    username: username,
+    hosts: hosts
+  });
+
+  for (const watcher of usernameWatchers) {
+    if (watcher.readyState === WebSocket.OPEN) {
+      watcher.send(message);
+    }
+  }
+
+  console.log(`Notified ${usernameWatchers.size} watchers about "${username}" hosts: ${hosts.length}`);
+}
+
 function handleJoinUsername(ws, username) {
   if (!username) {
     ws.send(JSON.stringify({
@@ -415,6 +486,20 @@ function handleDisconnect(ws) {
     return;
   }
 
+  // Handle watcher disconnect
+  if (info.role === 'watcher') {
+    const usernameWatchers = watchers.get(info.username);
+    if (usernameWatchers) {
+      usernameWatchers.delete(ws);
+      if (usernameWatchers.size === 0) {
+        watchers.delete(info.username);
+      }
+    }
+    socketInfo.delete(ws);
+    console.log(`Watcher disconnected from "${info.username}"`);
+    return;
+  }
+
   const room = rooms.get(info.roomId);
   if (!room) {
     socketInfo.delete(ws);
@@ -447,6 +532,10 @@ function handleDisconnect(ws) {
         }));
       }
     }
+
+    // Notify watchers about host disconnect
+    // Extract username from roomId (it's the normalized username)
+    notifyWatchers(info.roomId, remainingHosts);
 
     // Delete room if no hosts left
     if (room.hosts.size === 0) {

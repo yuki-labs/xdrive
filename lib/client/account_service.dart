@@ -1,9 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../relay/relay_connection.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
-/// Manages saved account settings and auto-discovery of hosts
+/// Manages saved account settings and real-time host discovery
 class AccountService with ChangeNotifier {
   static const String _usernameKey = 'saved_username';
   static const String _passphraseKey = 'saved_passphrase';
@@ -14,23 +15,27 @@ class AccountService with ChangeNotifier {
   String? _savedPassphrase;
   String _relayUrl = _defaultRelayUrl;
   List<String> _availableHosts = [];
-  bool _isChecking = false;
+  bool _isConnected = false;
   bool _isInitialized = false;
   String? _lastError;
-  Timer? _autoCheckTimer;
+  
+  WebSocketChannel? _watchChannel;
+  StreamSubscription? _watchSubscription;
+  Timer? _reconnectTimer;
   
   // Getters
   String? get savedUsername => _savedUsername;
   String? get savedPassphrase => _savedPassphrase;
   String get relayUrl => _relayUrl;
   List<String> get availableHosts => _availableHosts;
-  bool get isChecking => _isChecking;
+  bool get isConnected => _isConnected;
+  bool get isChecking => !_isConnected && _savedUsername != null; // Show as "checking" until connected
   bool get isInitialized => _isInitialized;
   String? get lastError => _lastError;
   bool get hasAccount => _savedUsername != null && _savedPassphrase != null;
   bool get hostsAvailable => _availableHosts.isNotEmpty;
   
-  /// Initialize - load saved settings and start auto-check
+  /// Initialize - load saved settings and start watching
   Future<void> initialize() async {
     if (_isInitialized) return;
     
@@ -38,10 +43,7 @@ class AccountService with ChangeNotifier {
     _isInitialized = true;
     
     if (hasAccount) {
-      // Check immediately
-      await checkForHosts();
-      // Start periodic checks
-      _startAutoCheck();
+      _startWatching();
     }
   }
   
@@ -70,9 +72,8 @@ class AccountService with ChangeNotifier {
       _lastError = null;
       notifyListeners();
       
-      // Start checking for hosts
-      await checkForHosts();
-      _startAutoCheck();
+      // Start watching for hosts
+      _startWatching();
       
       debugPrint('AccountService: Account saved: $username');
     } catch (e) {
@@ -92,7 +93,7 @@ class AccountService with ChangeNotifier {
       _savedPassphrase = null;
       _availableHosts = [];
       _lastError = null;
-      _stopAutoCheck();
+      _stopWatching();
       notifyListeners();
       debugPrint('AccountService: Account cleared');
     } catch (e) {
@@ -109,59 +110,113 @@ class AccountService with ChangeNotifier {
     _relayUrl = url;
     notifyListeners();
     
-    // Re-check with new URL
+    // Reconnect with new URL
     if (hasAccount) {
-      await checkForHosts();
+      _stopWatching();
+      _startWatching();
     }
   }
   
-  /// Check for available hosts via relay server
-  Future<void> checkForHosts() async {
-    if (_savedUsername == null) {
-      debugPrint('AccountService: No username saved, skipping host check');
-      return;
-    }
+  /// Start watching for host updates via persistent WebSocket
+  void _startWatching() {
+    if (_savedUsername == null) return;
     
-    _isChecking = true;
-    _lastError = null;
-    notifyListeners();
+    _stopWatching(); // Clean up any existing connection
+    
+    debugPrint('AccountService: Starting watcher for "$_savedUsername" at $_relayUrl');
     
     try {
-      debugPrint('AccountService: Checking hosts for "$_savedUsername" at $_relayUrl');
+      _watchChannel = WebSocketChannel.connect(Uri.parse(_relayUrl));
       
-      final connection = RelayConnection(_relayUrl);
-      final hosts = await connection.checkHostsForUsername(_savedUsername!);
+      // Send watch request
+      _watchChannel!.sink.add(jsonEncode({
+        'type': 'watch-username',
+        'username': _savedUsername,
+      }));
       
-      _availableHosts = hosts;
-      debugPrint('AccountService: Found ${hosts.length} hosts: $hosts');
+      // Listen for updates
+      _watchSubscription = _watchChannel!.stream.listen(
+        (message) {
+          _handleWatchMessage(message);
+        },
+        onError: (error) {
+          debugPrint('AccountService: WebSocket error: $error');
+          _lastError = 'Connection error';
+          _isConnected = false;
+          notifyListeners();
+          _scheduleReconnect();
+        },
+        onDone: () {
+          debugPrint('AccountService: WebSocket closed');
+          _isConnected = false;
+          notifyListeners();
+          _scheduleReconnect();
+        },
+      );
+      
+      _isConnected = true;
+      _lastError = null;
+      notifyListeners();
       
     } catch (e) {
-      debugPrint('AccountService: Error checking hosts: $e');
-      _lastError = 'Connection error: $e';
-      _availableHosts = [];
+      debugPrint('AccountService: Failed to connect: $e');
+      _lastError = 'Connection failed: $e';
+      _isConnected = false;
+      notifyListeners();
+      _scheduleReconnect();
     }
-    
-    _isChecking = false;
-    notifyListeners();
   }
   
-  void _startAutoCheck() {
-    _stopAutoCheck();
-    // Check every 15 seconds for better responsiveness
-    _autoCheckTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      checkForHosts();
+  void _handleWatchMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message.toString());
+      debugPrint('AccountService: Received ${data['type']}');
+      
+      if (data['type'] == 'hosts-updated') {
+        _availableHosts = List<String>.from(data['hosts'] ?? []);
+        _lastError = null;
+        debugPrint('AccountService: Hosts updated: $_availableHosts');
+        notifyListeners();
+      } else if (data['type'] == 'error') {
+        _lastError = data['message'] ?? 'Unknown error';
+        notifyListeners();
+      } else if (data['type'] == 'pong') {
+        // Heartbeat response, ignore
+      }
+    } catch (e) {
+      debugPrint('AccountService: Error parsing message: $e');
+    }
+  }
+  
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (hasAccount && !_isConnected) {
+        debugPrint('AccountService: Attempting reconnect...');
+        _startWatching();
+      }
     });
-    debugPrint('AccountService: Started auto-check timer (15s interval)');
   }
   
-  void _stopAutoCheck() {
-    _autoCheckTimer?.cancel();
-    _autoCheckTimer = null;
+  void _stopWatching() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _watchSubscription?.cancel();
+    _watchSubscription = null;
+    _watchChannel?.sink.close();
+    _watchChannel = null;
+    _isConnected = false;
+  }
+  
+  /// Manual refresh - reconnect to get latest hosts
+  Future<void> checkForHosts() async {
+    _stopWatching();
+    _startWatching();
   }
   
   @override
   void dispose() {
-    _stopAutoCheck();
+    _stopWatching();
     super.dispose();
   }
 }
