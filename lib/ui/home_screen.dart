@@ -607,17 +607,53 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.cloud_off, size: 64, color: Colors.grey.shade600),
-          const SizedBox(height: 16),
-          const Text('No hosts online', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text('Make sure the desktop app is running and\nInternet Access is enabled', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade500)),
-          const SizedBox(height: 24),
-          OutlinedButton.icon(
-            onPressed: accountService.isChecking ? null : () => accountService.checkForHosts(),
-            icon: const Icon(Icons.refresh),
-            label: const Text('Refresh'),
+          Icon(
+            accountService.lastError != null ? Icons.error_outline : Icons.cloud_off, 
+            size: 64, 
+            color: accountService.lastError != null ? Colors.orange : Colors.grey.shade600,
           ),
+          const SizedBox(height: 16),
+          Text(
+            accountService.lastError != null ? 'Connection Error' : 'No hosts online',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          if (accountService.lastError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                accountService.lastError!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.orange.shade300, fontSize: 12),
+              ),
+            )
+          else
+            Text(
+              'Make sure the desktop app is running and\nInternet Access is enabled',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
+          const SizedBox(height: 8),
+          Text(
+            'Relay: ${accountService.relayUrl}',
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 10),
+          ),
+          const SizedBox(height: 24),
+          if (accountService.isChecking)
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                SizedBox(width: 8),
+                Text('Checking...'),
+              ],
+            )
+          else
+            OutlinedButton.icon(
+              onPressed: () => accountService.checkForHosts(),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh'),
+            ),
         ],
       ),
     );
