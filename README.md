@@ -1,4 +1,4 @@
-# Spacedrive
+# xDrive File Manager
 
 A cross-platform file sharing and management application with end-to-end encryption, built with Flutter.
 
