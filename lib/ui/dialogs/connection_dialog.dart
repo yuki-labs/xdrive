@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 
 /// Result from connection dialog
 class ConnectionResult {
-  final String identifier;
-  final bool isUsername; // true = username, false = room ID
+  final String username;
   
-  ConnectionResult({required this.identifier, required this.isUsername});
+  ConnectionResult({required this.username});
+  
+  // For backward compatibility
+  String get identifier => username;
+  bool get isUsername => true;
 }
 
-/// Dialog to collect username or room ID for relay connection
+/// Dialog to collect username for relay connection
 class ConnectionDialog extends StatefulWidget {
   const ConnectionDialog({super.key});
 
@@ -18,15 +21,11 @@ class ConnectionDialog extends StatefulWidget {
 
 class _ConnectionDialogState extends State<ConnectionDialog> {
   final _controller = TextEditingController();
-  bool _useUsername = true; // Default to username mode
 
   void _submit() {
     final value = _controller.text.trim();
     if (value.isNotEmpty) {
-      Navigator.pop(context, ConnectionResult(
-        identifier: _useUsername ? value : value.toLowerCase(),
-        isUsername: _useUsername,
-      ));
+      Navigator.pop(context, ConnectionResult(username: value));
     }
   }
 
@@ -44,43 +43,20 @@ class _ConnectionDialogState extends State<ConnectionDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Toggle between username and room ID
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(
-                value: true,
-                label: Text('Username'),
-                icon: Icon(Icons.person),
-              ),
-              ButtonSegment(
-                value: false,
-                label: Text('Room ID'),
-                icon: Icon(Icons.meeting_room),
-              ),
-            ],
-            selected: {_useUsername},
-            onSelectionChanged: (selection) {
-              setState(() => _useUsername = selection.first);
-            },
-          ),
-          const SizedBox(height: 16),
-          
-          Text(
-            _useUsername 
-                ? 'Enter the username from the desktop host:'
-                : 'Enter the Room ID from the desktop host:',
-            style: const TextStyle(fontSize: 14),
+          const Text(
+            'Enter the username from the desktop host:',
+            style: TextStyle(fontSize: 14),
           ),
           const SizedBox(height: 12),
           
           TextField(
             controller: _controller,
             autofocus: true,
-            decoration: InputDecoration(
-              labelText: _useUsername ? 'Username' : 'Room ID',
-              hintText: _useUsername ? 'john' : 'alpha-bravo-charlie',
-              border: const OutlineInputBorder(),
-              prefixIcon: Icon(_useUsername ? Icons.person : Icons.meeting_room),
+            decoration: const InputDecoration(
+              labelText: 'Username',
+              hintText: 'john',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.person),
             ),
             textCapitalization: TextCapitalization.none,
             autocorrect: false,
@@ -88,11 +64,9 @@ class _ConnectionDialogState extends State<ConnectionDialog> {
           ),
           const SizedBox(height: 8),
           
-          Text(
-            _useUsername 
-                ? 'Connect using the host\'s username'
-                : 'Legacy format: word-word-word',
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          const Text(
+            'Get this from Settings → Internet Access on the host',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],
       ),

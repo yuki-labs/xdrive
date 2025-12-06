@@ -666,19 +666,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (passphrase == null || !context.mounted) return;
     
     try {
-      if (connectionResult.isUsername) {
-        final hosts = await provider.connectViaUsername(connectionResult.identifier, passphrase);
-        if (!context.mounted) return;
-        
-        await accountService.saveAccount(connectionResult.identifier, passphrase);
-        
-        if (hosts.length > 1) {
-          final selectedHost = await showDialog<String>(context: context, builder: (context) => HostPickerDialog(hosts: hosts, username: connectionResult.identifier));
-          if (selectedHost == null || !context.mounted) return;
-          await provider.selectHost(selectedHost);
-        }
-      } else {
-        await provider.connectViaRelay(connectionResult.identifier, passphrase);
+      final hosts = await provider.connectViaUsername(connectionResult.username, passphrase);
+      if (!context.mounted) return;
+      
+      await accountService.saveAccount(connectionResult.username, passphrase);
+      
+      if (hosts.length > 1) {
+        final selectedHost = await showDialog<String>(context: context, builder: (context) => HostPickerDialog(hosts: hosts, username: connectionResult.username));
+        if (selectedHost == null || !context.mounted) return;
+        await provider.selectHost(selectedHost);
       }
     } catch (e) {
       if (context.mounted) {
