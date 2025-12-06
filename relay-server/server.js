@@ -1,14 +1,34 @@
 const WebSocket = require('ws');
+const http = require('http');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8081;
-const wss = new WebSocket.Server({ port: PORT });
 
 // Track active rooms: roomId -> { hosts: Map<deviceName, WebSocket>, clients: Set<WebSocket> }
 const rooms = new Map();
 
 // Track which WebSocket belongs to which room and their role
 const socketInfo = new Map(); // ws -> { roomId, role: 'host'|'client', deviceName? }
+
+// Create HTTP server for health checks (required by Railway/cloud platforms)
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      service: 'spacedrive-relay',
+      rooms: rooms.size,
+      connections: wss ? wss.clients.size : 0,
+      uptime: process.uptime()
+    }));
+  } else {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+});
+
+// Create WebSocket server attached to HTTP server
+const wss = new WebSocket.Server({ server });
 
 console.log(`Relay server starting on port ${PORT}...`);
 
@@ -455,19 +475,21 @@ setInterval(() => {
   });
 }, 30000);
 
-wss.on('listening', () => {
+// Start the HTTP server (which also handles WebSocket upgrades)
+server.listen(PORT, () => {
   console.log(`✅ Relay server running on port ${PORT}`);
+  console.log(`HTTP health check: http://localhost:${PORT}/health`);
   console.log(`WebSocket URL: ws://localhost:${PORT}`);
 });
 
-wss.on('error', (error) => {
+server.on('error', (error) => {
   console.error('Server error:', error);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, closing server...');
-  wss.close(() => {
+  server.close(() => {
     console.log('Server closed');
     process.exit(0);
   });
